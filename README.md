@@ -26,9 +26,9 @@ für den **Pioneer DDJ-FLX4** (rekordbox) planen. Läuft lokal auf deinem Rechne
 
 ### Mit Installer (macOS, Windows)
 
-Die Installer baut GitHub Actions: im Repository unter **Actions → „Installer bauen“** den neuesten Lauf
-öffnen und unten bei „Artifacts“ die passende Datei laden (bei einem Versions-Tag liegen sie zusätzlich
-unter **Releases**).
+Die fertigen Installer liegen im Repository unter **Releases**. Einen neuen Stand baust du unter
+**Actions → „Installer bauen“ → Run workflow**; trägst du dabei eine Version ein (z. B. `v0.2.0`), entsteht
+daraus ein neues Release, sonst liegen die Dateien nur als „Artifacts“ am Lauf.
 
 | System | Datei | Installation |
 |---|---|---|
