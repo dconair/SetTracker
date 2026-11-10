@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "settracker"
+version = "0.1.0"
+description = "DJ-Set-Planer: Tracks sichten, Sets bauen, Übergänge für den DDJ-FLX4 planen"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "python-multipart>=0.0.9",
+    "librosa>=0.10.2",
+    "soundfile>=0.12",
+    "numpy>=1.26",
+    "mutagen>=1.47",
+    "spotipy>=2.24",
+    "httpx>=0.27",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+settracker = "settracker.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["settracker*"]
+
+[tool.setuptools.package-data]
+settracker = ["static/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
