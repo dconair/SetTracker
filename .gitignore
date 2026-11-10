@@ -8,3 +8,5 @@ frontend/dist/
 data/
 *.db
 .cache*
+build/
+dist/

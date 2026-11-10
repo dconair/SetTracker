@@ -17,13 +17,40 @@ für den **Pioneer DDJ-FLX4** (rekordbox) planen. Läuft lokal auf deinem Rechne
   zeigt einen Umbau-Vorschlag im Vorher/Nachher-Vergleich und Einzel-Eingriffe (tauschen, Brücken-Track,
   Ausreißer entfernen). Das Original wird nie überschrieben.
 - **Übergänge** – wählt je Paar eine Übergangsart (Bass-Swap-Blend, Filter-Fade, Echo-Out, Loop-Out, Cut,
-  Smart Fader), markiert Mix-Out/Mix-In in den Waveforms und nennt die Handgriffe am FLX4.
+  Smart Fader), markiert Mix-Out/Mix-In in den Waveforms und führt Schritt für Schritt durch die Handgriffe:
+  Ein Schema des FLX4 hebt je Schritt die Regler und Tasten hervor.
 - **Export** – Spotify-Playlist, rekordbox-XML (Beatgrid + Hot Cues MIX IN / DROP / BASS SWAP / MIX OUT),
   M3U und ein druckbarer Spickzettel.
 
 ## Installation
 
-Voraussetzung: Python 3.10 oder neuer. (Für MP3/M4A zusätzlich [ffmpeg](https://ffmpeg.org/download.html).)
+### Mit Installer (macOS, Windows)
+
+Die Installer baut GitHub Actions: im Repository unter **Actions → „Installer bauen“** den neuesten Lauf
+öffnen und unten bei „Artifacts“ die passende Datei laden (bei einem Versions-Tag liegen sie zusätzlich
+unter **Releases**).
+
+| System | Datei | Installation |
+|---|---|---|
+| Mac mit Apple-Chip (M1 oder neuer) | `SetTracker-macOS-AppleSilicon.dmg` | öffnen, SetTracker auf „Programme“ ziehen |
+| Mac mit Intel-Prozessor | `SetTracker-macOS-Intel.dmg` | öffnen, SetTracker auf „Programme“ ziehen |
+| Windows 10/11 | `SetTracker-Setup.exe` | ausführen, keine Administratorrechte nötig |
+
+Die Installer sind **nicht signiert** (dafür wären kostenpflichtige Entwicklerzertifikate nötig), deshalb
+warnt das System beim ersten Start:
+
+- **macOS:** Nach dem ersten Startversuch *Systemeinstellungen → Datenschutz & Sicherheit* öffnen und bei
+  „SetTracker wurde blockiert“ auf **Dennoch öffnen** klicken.
+- **Windows:** Im SmartScreen-Fenster **Weitere Informationen → Trotzdem ausführen**.
+
+SetTracker hat kein eigenes Fenster: Beim Start öffnet sich die App im Browser unter http://127.0.0.1:8000.
+Ein erneuter Start öffnet nur wieder den Browser. Beendet wird über **Beenden** unten in der Seitenleiste.
+Der erste Start und die erste Analyse dauern etwas länger. MP3, WAV, FLAC, OGG und AIFF funktionieren ohne
+Zusatzsoftware; für M4A/AAC muss [ffmpeg](https://ffmpeg.org/download.html) installiert sein.
+
+### Mit Python (alle Systeme)
+
+Voraussetzung: Python 3.10 oder neuer.
 
 ```bash
 git clone https://github.com/dconair/SetTracker.git
@@ -41,26 +68,60 @@ pip install .
 settracker
 ```
 
-Die App öffnet sich unter http://127.0.0.1:8000. Daten (Datenbank, Spotify-Login) liegen in `~/.settracker`.
-Zum Ausprobieren ohne eigene Musik: in der leeren Bibliothek „Demo-Tracks laden“.
+Daten (Datenbank, Spotify-Zugang, Logdatei) liegen in beiden Fällen im Ordner `.settracker` in deinem
+Benutzerordner. Zum Ausprobieren ohne eigene Musik: in der leeren Bibliothek „Demo-Tracks laden“.
 
 ## Spotify einrichten
 
+Die Zugangsdaten gelten pro Rechner – was in einer Cloud-Umgebung hinterlegt ist, kennt die App auf deinem
+Computer nicht. Alles läuft in der App: **Bibliothek → Spotify importieren**.
+
 1. Im [Spotify Developer Dashboard](https://developer.spotify.com/dashboard) eine App anlegen
-   (Spotify Premium erforderlich) und als Redirect URI exakt `http://127.0.0.1:8000/callback` eintragen.
-2. `.env.example` nach `.env` kopieren, Client ID und Client Secret eintragen, SetTracker neu starten.
-3. In der Bibliothek „Spotify importieren“ → „Mit Spotify anmelden“.
+   (Spotify Premium erforderlich), „Web API“ ankreuzen und als Redirect URI exakt
+   `http://127.0.0.1:8000/callback` eintragen.
+2. Client ID und Client Secret in den Dialog einfügen und speichern.
+3. „Mit Spotify anmelden“ und den Zugriff bestätigen.
+
+Klappt etwas nicht, zeigt **Verbindung prüfen** im selben Dialog Schritt für Schritt, woran es liegt
+(Zugangsdaten, Redirect URI, Freischaltung des Kontos unter „User Management“, Premium).
 
 Gut zu wissen:
 
-- Spotify gibt Apps keine BPM-, Tonart- oder Genre-Daten und kein Audio mehr. SetTracker holt BPM, Tonart,
-  Energie und Stimmung deshalb von [ReccoBeats](https://reccobeats.com) und Genres über den Künstler von
-  [MusicBrainz](https://musicbrainz.org) (eine Anfrage pro Sekunde – große Bibliotheken brauchen etwas).
+- Spotify gibt Apps keine BPM-, Tonart-, Genre- oder Strukturdaten und kein Audio mehr. SetTracker holt BPM,
+  Tonart, Energie und Stimmung deshalb von [ReccoBeats](https://reccobeats.com) und Genres über den Künstler
+  von [MusicBrainz](https://musicbrainz.org) (eine Anfrage pro Sekunde – große Bibliotheken brauchen etwas).
   Nicht jeder Track ist dort bekannt; Genres lassen sich in der Bibliothek auch von Hand setzen.
-- **Waveform, Beatgrid und taktgenaue Mix-Punkte gibt es nur für lokale Audiodateien.** Für reine
-  Spotify-Tracks sind die Übergangs-Anleitungen allgemein gehalten. Liegt ein Track lokal *und* in einer
-  importierten Playlist, verknüpft SetTracker beide automatisch.
+- **Sets lassen sich komplett aus Spotify-Tracks bauen** – Wertung, Reihenfolge, Smart Shuffle, Übergangsart
+  und die Anleitung am Controller-Schema funktionieren. Was dabei fehlt: Waveform, erkannte Phasen
+  (Intro/Drop/Break/Outro) und taktgenaue Mix-Punkte gibt es nur für lokale Audiodateien. Für Spotify-Tracks
+  sind Zeitangaben und Hot Cues ein geschätztes 16-Takt-Raster zum Nachjustieren nach Gehör.
+  Liegt ein Track lokal *und* in einer importierten Playlist, verknüpft SetTracker beide automatisch.
 - Audio aus Spotify herunterzuladen ist nicht möglich und nicht vorgesehen.
+
+## Hot Cues, Loops und Phasen
+
+Ein Klick auf einen Titel öffnet die Track-Details: Waveform mit beschrifteten Phasen und die Belegung der
+acht Performance-Pads.
+
+| Pad | Inhalt |
+|---|---|
+| 1 | INTRO bzw. START – im Set: MIX IN |
+| 2 | DROP (Beginn des ersten Hauptteils) |
+| 3 | BREAK |
+| 4 | DROP 2 (Hauptteil nach dem Break) |
+| 5 | LOOP INTRO – 4-Takt-Loop zum Verlängern beim Reinmixen |
+| 6 | LOOP OUTRO – 4-Takt-Loop, hält den Beat beim Rausmixen |
+| 7 | BASS SWAP (nur im Set, je nach Übergang) |
+| 8 | OUTRO – im Set: MIX OUT |
+
+Der rekordbox-Export schreibt Hot Cues und Loops in die XML, alle Phasen zusätzlich als beschriftete
+Memory Cues. Die Phasen-Erkennung arbeitet über Energie- und Bassverlauf je Takt; bei Tracks ohne klare
+Struktur bitte in rekordbox gegenprüfen.
+
+## Darstellung
+
+Unter **Darstellung** in der Seitenleiste: sechs Designs (Studio, Mitternacht, Club, Vinyl, Papier, Sand),
+sechs Akzentfarben und vier Farbschemata für die Waveform. Die Auswahl wird im Browser gespeichert.
 
 ## Mit rekordbox und dem DDJ-FLX4 nutzen
 
@@ -68,7 +129,7 @@ Gut zu wissen:
   erscheint die Playlist unter „Spotify“ und lässt sich direkt auf die Decks laden.
 - **Datei-Weg:** Set → Export → „rekordbox-XML“. In rekordbox unter *Einstellungen → Erweitert → Datenbank →
   rekordbox xml* die Datei auswählen, dann links im Baum unter „rekordbox xml“ die Playlist per Rechtsklick
-  importieren. Die Hot Cues liegen auf den Pads 1 (MIX IN), 2 (DROP), 7 (BASS SWAP) und 8 (MIX OUT).
+  importieren. Die Pad-Belegung steht oben unter „Hot Cues, Loops und Phasen“.
   Tracks, die schon mit eigenem Beatgrid in deiner rekordbox-Sammlung sind, behalten dort ihr Grid.
 - Den **Spickzettel** (Export) neben den Controller legen oder im Browser als PDF drucken.
 
@@ -104,4 +165,5 @@ cd frontend && npm ci && npm run build
 
 Aufbau: `settracker/analysis` (Audio-Analyse), `settracker/engine` (Wertung, Reihenfolge, Vorschläge,
 Übergänge, FLX4-Schritte, Playlist-Check), `settracker/spotify` (Spotify, ReccoBeats, MusicBrainz),
-`settracker/export` (rekordbox-XML, M3U, Spickzettel), `settracker/app.py` (API).
+`settracker/export` (rekordbox-XML, M3U, Spickzettel), `settracker/app.py` (API), `packaging/` und
+`.github/workflows/installer.yml` (Installer).
