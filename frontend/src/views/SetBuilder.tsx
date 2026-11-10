@@ -1,13 +1,13 @@
 import { closestCenter, DndContext, KeyboardSensor, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import { ArrowLeft, ChevronDown, Compass, Download, FileCode2, FileText, GripVertical, ListMusic, ListPlus, Pin, Plus, Printer, ScanSearch, Sparkles, Trash2, Wand2, X } from "lucide-react";
+import { ArrowLeft, CheckCircle2, ChevronDown, ClipboardCopy, Compass, Download, FolderPlus, RefreshCw, FileCode2, FileText, GripVertical, ListMusic, ListPlus, Pin, Plus, Printer, ScanSearch, Sparkles, Trash2, Wand2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { useStore } from "../store";
 import type { SetView, Suggestion, Track, Transition } from "../types";
-import { Button, Card, cx, Empty, fmtBpm, fmtLong, IconButton, KeyBadge, Menu, MenuItem, Meter, Modal, PageHeader, ScoreBadge, Select, SourceTag, TrackTitle, useAction, verdictColor } from "../ui";
-import { SpotifyLogo } from "./Library";
+import { Button, Card, cx, Empty, fmtBpm, fmtLong, IconButton, KeyBadge, Menu, MenuItem, Meter, Modal, PageHeader, ScoreBadge, Select, changesText, SourceTag, TrackTitle, useAction, useToast, verdictColor } from "../ui";
+import { FolderDialog, SpotifyLogo } from "./Library";
 import { TransitionPanel } from "./TransitionPanel";
 
 export function SetList() {
@@ -69,6 +69,10 @@ export function SetBuilder({ id }: { id: number }) {
   const [openTransition, setOpenTransition] = useState<number | null>(null);
   const [sorting, setSorting] = useState(false);
   const [exported, setExported] = useState<{ url: string; added: number; missing: string[] } | null>(null);
+  const [onlyMissing, setOnlyMissing] = useState(false);
+  const [folder, setFolder] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const toast = useToast();
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }), useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }));
 
   const load = useCallback(() => api.set(id).then(setView).catch(() => setMissing(true)), [id]);
@@ -106,6 +110,17 @@ export function SetBuilder({ id }: { id: number }) {
   };
   const transitions = new Map(view.rating.transitions.map((t) => [t.index, t]));
   const total = view.items.length;
+  const missingTracks = view.items.filter((i) => !i.track.path);
+  const refresh = async () => {
+    setRefreshing(true);
+    const r = await run(() => api.refreshSet(id));
+    setRefreshing(false);
+    if (r) { setView(r.set); toast(changesText(r.changes)); refreshSets(); }
+  };
+  const copyMissing = async () => {
+    const text = missingTracks.map((i) => `${i.track.artist} – ${i.track.title}`).join("\n");
+    try { await navigator.clipboard.writeText(text); toast(`${missingTracks.length} Titel kopiert`); } catch { toast("Kopieren nicht möglich – bitte die CSV nutzen", "error"); }
+  };
 
   return (
     <div className="flex min-h-full flex-col">
@@ -121,6 +136,7 @@ export function SetBuilder({ id }: { id: number }) {
         </span>}
         subtitle={<span className="pl-10">{total} Tracks · {fmtLong(view.duration)}{view.origin ? ` · ${view.origin}` : ""}</span>}
       >
+        {view.spotify_playlist_id && <Button icon={<RefreshCw size={16} />} loading={refreshing} onClick={refresh} title="Playlist erneut aus Spotify laden – Inhalt und Reihenfolge werden übernommen">Aus Spotify aktualisieren</Button>}
         <Button icon={<Wand2 size={16} />} loading={sorting} disabled={total < 3} onClick={autosort} title="Reihenfolge für bessere Übergänge optimieren (angepinnte Tracks bleiben)">Auto-Sortieren</Button>
         <Button icon={<ScanSearch size={16} />} disabled={total < 2} onClick={() => go(`check/${id}`)}>Playlist-Check</Button>
         <Menu trigger={() => <Button variant="primary" icon={<Download size={16} />} disabled={total === 0}>Export <ChevronDown size={14} /></Button>}>
@@ -166,6 +182,35 @@ export function SetBuilder({ id }: { id: number }) {
             </Card>
           )}
 
+          {total > 0 && (missingTracks.length > 0 || view.files.local > 0) && (
+            <Card className="mb-4 p-4">
+              {missingTracks.length === 0 ? (
+                <div className="flex flex-wrap items-center gap-3">
+                  <CheckCircle2 size={18} className="shrink-0 text-good" />
+                  <span className="min-w-0 flex-1 text-[13px]">
+                    <b className="font-semibold">Alle {total} Tracks liegen als Datei vor.</b>{" "}
+                    <span className="text-muted">{view.files.analyzed < total ? `${total - view.files.analyzed} werden noch analysiert.` : "Hot Cues, Loops und Übergänge sind taktgenau."}</span>
+                  </span>
+                  {view.files.analyzed === total && <Button size="sm" icon={<FileCode2 size={15} />} onClick={() => { window.location.href = `/api/sets/${id}/export/rekordbox.xml`; }}>rekordbox-XML exportieren</Button>}
+                </div>
+              ) : (
+                <>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+                    <span className="text-[13px]"><b className="num font-semibold">{view.files.local} von {total}</b> <span className="text-muted">Tracks als Datei vorhanden</span></span>
+                    <div className="h-1.5 min-w-24 flex-1 overflow-hidden rounded-full bg-line"><div className="h-full rounded-full bg-good transition-[width] duration-500" style={{ width: `${(view.files.local / total) * 100}%` }} /></div>
+                    <button onClick={() => setOnlyMissing(!onlyMissing)} aria-pressed={onlyMissing} className={cx("h-8 rounded-full border px-3 text-[13px] font-medium transition-colors", onlyMissing ? "border-accent bg-accent-soft text-accent" : "border-line text-muted hover:bg-hover hover:text-text")}>Nur fehlende zeigen ({missingTracks.length})</button>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <span className="min-w-0 flex-1 text-xs text-muted">Für die fehlenden Tracks gibt es noch keine Waveform und nur geschätzte Mix-Punkte. Lege die Dateien in einen Ordner und füge ihn hinzu – sie werden automatisch zugeordnet.</span>
+                    <Button size="sm" variant="ghost" icon={<ClipboardCopy size={15} />} onClick={copyMissing}>Liste kopieren</Button>
+                    <Button size="sm" variant="ghost" icon={<FileText size={15} />} onClick={() => { window.location.href = `/api/sets/${id}/missing.csv`; }}>Als CSV</Button>
+                    <Button size="sm" icon={<FolderPlus size={15} />} onClick={() => setFolder(true)}>Ordner hinzufügen</Button>
+                  </div>
+                </>
+              )}
+            </Card>
+          )}
+
           {total === 0 ? (
             <Card><Empty icon={<ListPlus size={26} />} title="Das Set ist noch leer" action={<Button variant="primary" onClick={() => go("bibliothek")}>Zur Bibliothek</Button>}>
               Wähle in der Bibliothek Tracks aus und füge sie diesem Set hinzu. Danach schlägt Smart Shuffle hier passende nächste Tracks vor.
@@ -175,13 +220,13 @@ export function SetBuilder({ id }: { id: number }) {
               <SortableContext items={view.items.map((i) => i.track.id)} strategy={verticalListSortingStrategy}>
                 <div>
                   {view.items.map((item, index) => (
-                    <div key={item.track.id}>
+                    <div key={item.track.id} hidden={onlyMissing && !!item.track.path}>
                       <SetRow
                         track={item.track} index={index} pinned={item.pinned}
                         onPin={() => save(view.items.map((i) => ({ track_id: i.track.id, pinned: i.track.id === item.track.id ? !i.pinned : i.pinned })))}
                         onRemove={() => save(itemsOf(view).filter((i) => i.track_id !== item.track.id))}
                       />
-                      {index < total - 1 && (
+                      {index < total - 1 && !onlyMissing && (
                         <TransitionChip transition={transitions.get(index)} active={insertAt === index + 1}
                           onOpen={() => setOpenTransition(index)} onInsert={() => setInsertAt(insertAt === index + 1 ? null : index + 1)} />
                       )}
@@ -198,6 +243,7 @@ export function SetBuilder({ id }: { id: number }) {
         </aside>
       </div>
 
+      {folder && <FolderDialog onClose={() => setFolder(false)} />}
       {openTransition !== null && <TransitionPanel setId={id} index={openTransition} total={total - 1} onClose={() => { setOpenTransition(null); load(); }} onNavigate={setOpenTransition} />}
       {exported && (
         <Modal title="Spotify-Playlist angelegt" onClose={() => setExported(null)} footer={<>

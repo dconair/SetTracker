@@ -274,3 +274,14 @@ export function useAction() {
     [toast],
   );
 }
+
+import type { Changes } from "./types";
+
+export const changesText = (c: Changes) => {
+  const parts = [c.added && `${c.added} neu`, c.removed && `${c.removed} entfernt`, c.moved && "Reihenfolge geändert"].filter(Boolean);
+  return parts.length ? `Aus Spotify aktualisiert: ${parts.join(", ")}` : "Keine Änderungen in Spotify";
+};
+
+/** Farbe je Stimmung – für das Stimmungs-Band im Playlist-Check. */
+export const moodColor = (mood: string) =>
+  ({ Euphorisch: "#ffb84d", "Treibend & dunkel": "#f2617a", Groovig: "#3ecf8e", "Deep & hypnotisch": "#6c8cff", Entspannt: "#5fd4d4", Melancholisch: "#a78bfa" } as Record<string, string>)[mood] ?? "var(--line)";

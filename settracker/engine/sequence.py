@@ -33,17 +33,34 @@ def relative_energy(tracks: list[dict]) -> list[float]:
     return [rank.get(t.get("energy"), 0.5) for t in tracks]
 
 
+def mood_fit(a: dict, b: dict) -> float | None:
+    """Wie ruhig ist der Stimmungswechsel a → b (1 = gleiche Stimmung)? None, wenn unbekannt."""
+    va, vb = a.get("valence"), b.get("valence")
+    if va is None or vb is None:
+        return None
+    fit = 1 - min(1.0, abs(vb - va) / 0.6)
+    if a.get("energy") is not None and b.get("energy") is not None:
+        fit = 0.7 * fit + 0.3 * (1 - min(1.0, abs(b["energy"] - a["energy"]) / 0.5))
+    return fit
+
+
 def optimize(tracks: list[dict], curve: str = "build", pinned: set[int] | None = None,
-             weights: dict | None = None, curve_weight: float = 0.3) -> dict:
+             weights: dict | None = None, curve_weight: float = 0.3, mood_weight: float = 0.2) -> dict:
     """Beste gefundene Reihenfolge. `pinned` = Positionen (Indizes), die fix bleiben.
 
+    `mood_weight` (0–1) gewichtet zusätzlich einen ruhigen Stimmungsverlauf zwischen Nachbarn.
     Liefert {"order": Indizes in neuer Reihenfolge, "before": Score, "after": Score}.
     """
     n = len(tracks)
     pinned = {p for p in (pinned or set()) if 0 <= p < n}
     if n < 3:
         return {"order": list(range(n)), "before": 1.0, "after": 1.0}
-    matrix = [[pair_score(a, b, weights)["score"] if i != j else 0.0 for j, b in enumerate(tracks)] for i, a in enumerate(tracks)]
+    def link(a: dict, b: dict) -> float:
+        score = pair_score(a, b, weights)["score"]
+        mood = mood_fit(a, b) if mood_weight else None
+        return score if mood is None else (1 - mood_weight) * score + mood_weight * mood
+
+    matrix = [[link(a, b) if i != j else 0.0 for j, b in enumerate(tracks)] for i, a in enumerate(tracks)]
     rel = relative_energy(tracks)
     targets = [curve_target(i / (n - 1), curve) for i in range(n)]
     cw = 0.0 if curve == "free" or targets[0] is None else curve_weight

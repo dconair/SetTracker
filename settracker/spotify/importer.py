@@ -1,34 +1,20 @@
 """Spotify-Tracks in die Bibliothek übernehmen und mit Merkmalen anreichern."""
 from __future__ import annotations
 
-import re
 import threading
 
 from .. import db
 from ..music import genre_family
 from . import musicbrainz, reccobeats
+from .match import same_track
 
 _state = {"running": False, "phase": "", "done": 0, "total": 0, "message": ""}
 _lock = threading.Lock()
 
 
-def _norm(text: str) -> str:
-    text = re.sub(r"\(.*?\)|\[.*?\]|feat\..*|ft\..*", "", text.lower())
-    return re.sub(r"[^a-z0-9]+", "", text)
-
-
 def find_local_match(item: dict, tracks: list[dict]) -> dict | None:
-    """Passende lokale Datei zu einem Spotify-Track (ISRC, sonst Titel + erster Künstler + Dauer)."""
-    title, artist = _norm(item["title"]), _norm(item["artist"].split(",")[0])
-    for t in tracks:
-        if t["source"] != "local":
-            continue
-        if item.get("isrc") and t.get("isrc") and item["isrc"].upper() == t["isrc"].upper():
-            return t
-        if _norm(t["title"]) == title and title and (not artist or artist in _norm(t["artist"]) or _norm(t["artist"].split(",")[0]) in artist):
-            if not t["duration"] or not item["duration"] or abs(t["duration"] - item["duration"]) < 15:
-                return t
-    return None
+    """Passende lokale Datei zu einem Spotify-Track."""
+    return next((t for t in tracks if t["source"] == "local" and same_track(item, t)), None)
 
 
 def upsert(items: list[dict], collection: str) -> list[int]:

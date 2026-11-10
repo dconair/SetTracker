@@ -158,3 +158,90 @@ def test_track_detail_has_cues_and_spotify_check_reports_steps(api, lib, monkeyp
     assert not check["ok"] and check["steps"][0]["ok"] is False and "Client ID" in check["steps"][0]["hint"]
     bad = api.get("/callback", params={"error": "access_denied"})
     assert bad.status_code == 400 and "abgelehnt" in bad.text
+
+
+def _spotify_item(sid, title, artist, duration, isrc=None):
+    return {"spotify_id": sid, "title": title, "artist": artist, "album": "", "duration": duration, "isrc": isrc}
+
+
+def test_local_file_takes_over_spotify_entry(api, lib, monkeypatch, tmp_path):
+    """Erst in Spotify planen, dann Dateien nachladen: Die Datei übernimmt den Eintrag im Set."""
+    import soundfile as sf
+
+    from settracker import demo, library
+
+    monkeypatch.setattr(reccobeats, "features", lambda ids: {i: {"bpm": 99.0, "camelot": "1A", "energy": 0.5, "valence": 0.5} for i in ids})
+    monkeypatch.setattr(importer.musicbrainz, "artist_genres", lambda name, isrc=None: ["house"])
+    ids = importer.run_import([_spotify_item("sp_a", "Fresh Cut (Extended Mix)", "New Artist", 61),
+                               _spotify_item("sp_b", "Other Song", "Somebody Else", 200)], "Planung", background=False)
+    view = api.post("/api/sets", json={"name": "Geplant", "track_ids": ids}).json()
+    assert view["files"] == {"local": 0, "analyzed": 0, "total": 2}
+    assert not api.get(f"/api/sets/{view['id']}/transition/0").json()["plan"]["precise"]
+    csv = api.get(f"/api/sets/{view['id']}/missing.csv").text
+    assert "Fresh Cut" in csv and "Other Song" in csv and "open.spotify.com/track/sp_a" in csv
+
+    folder = tmp_path / "Gekauft"
+    folder.mkdir()
+    sf.write(folder / "New Artist - Fresh Cut.wav", demo.synth(128, 9, False, (8, 8, 4, 8, 4)), demo.SR)
+    sf.write(folder / "New Artist - Ganz Anderes Lied.wav", demo.synth(120, 4, False, (4, 8, 4, 8, 4)), demo.SR)
+    result = api.post("/api/library/scan", json={"path": str(folder)}).json()
+    assert result["found"] == 2 and result["linked"] == 1 and result["added"] == 1
+    library.wait_idle()
+
+    track = db.get_track(ids[0])
+    assert track["source"] == "local" and track["spotify_id"] == "sp_a" and track["status"] == "done"
+    assert track["bpm"] == 128 and track["analysis"]["sections"] and track["title"] == "Fresh Cut (Extended Mix)"
+    after = api.get(f"/api/sets/{view['id']}").json()
+    assert [i["track"]["id"] for i in after["items"]] == ids and after["files"] == {"local": 1, "analyzed": 1, "total": 2}
+    assert "Fresh Cut" not in api.get(f"/api/sets/{view['id']}/missing.csv").text
+    assert api.get(f"/api/tracks/{ids[0]}").json()["cues"][0]["estimated"] is False
+
+    # Von Hand zuordnen: die zweite Datei dem zweiten Spotify-Eintrag geben
+    other = next(t for t in db.all_tracks() if t["title"] == "Ganz Anderes Lied")
+    cands = api.get(f"/api/tracks/{ids[1]}/link-candidates").json()
+    assert other["id"] in [c["id"] for c in cands]
+    api.put(f"/api/sets/{view['id']}", json={"items": [{"track_id": ids[0]}, {"track_id": other["id"]}, {"track_id": ids[1]}]})
+    linked = api.post(f"/api/tracks/{ids[1]}/link", json={"other_id": other["id"]}).json()
+    assert linked["source"] == "local" and linked["bpm"] == 120 and db.get_track(other["id"]) is None
+    merged = api.get(f"/api/sets/{view['id']}").json()
+    assert [i["track"]["id"] for i in merged["items"]] == ids and merged["files"]["local"] == 2
+    assert api.get(f"/api/sets/{view['id']}/transition/0").json()["plan"]["precise"]
+    assert api.post(f"/api/tracks/{ids[1]}/link", json={"other_id": ids[0]}).status_code == 400
+
+    # und wieder lösen
+    split = api.post(f"/api/tracks/{ids[1]}/unlink").json()
+    assert split["spotify"]["source"] == "spotify" and split["spotify"]["bpm"] == 99.0
+    library.wait_idle()
+    assert db.get_track(split["file_id"])["path"].endswith("Ganz Anderes Lied.wav")
+    api.delete(f"/api/sets/{view['id']}")
+    for i in (*ids, split["file_id"]):
+        db.delete_track(i)
+
+
+def test_spotify_playlist_refresh_keeps_set_and_pins(api, lib, monkeypatch):
+    from settracker.spotify import client
+
+    monkeypatch.setattr(reccobeats, "features", lambda ids: {i: {"bpm": 124.0, "camelot": "8A", "energy": 0.6, "valence": 0.5} for i in ids})
+    monkeypatch.setattr(importer.musicbrainz, "artist_genres", lambda name, isrc=None: [])
+    monkeypatch.setattr(importer, "run_import", lambda items, name, background=True, _orig=importer.run_import: _orig(items, name, background=False))
+    a, b, c, d = (_spotify_item(f"pl_{x}", f"Song {x}", "Band", 180 + i) for i, x in enumerate("abcd"))
+    playlist = {"items": [a, b, c]}
+    monkeypatch.setattr(client, "playlist_tracks", lambda pid: ("Samstag", playlist["items"]))
+
+    first = api.post("/api/spotify/import", json={"playlist_id": "PL1", "as_set": True}).json()
+    view = api.get(f"/api/sets/{first['set_id']}").json()
+    assert view["spotify_playlist_id"] == "PL1" and [i["track"]["title"] for i in view["items"]] == ["Song a", "Song b", "Song c"]
+    items = [{"track_id": i["track"]["id"], "pinned": i["track"]["title"] == "Song c"} for i in view["items"]]
+    api.put(f"/api/sets/{view['id']}", json={"items": items})
+
+    playlist["items"] = [c, a, d]  # in Spotify umgebaut: b raus, d rein, c nach vorn
+    refreshed = api.post(f"/api/sets/{view['id']}/refresh").json()
+    assert refreshed["changes"] == {"added": 1, "removed": 1, "moved": True}
+    assert [(i["track"]["title"], i["pinned"]) for i in refreshed["set"]["items"]] == [("Song c", True), ("Song a", False), ("Song d", False)]
+    again = api.post("/api/spotify/import", json={"playlist_id": "PL1", "as_set": True}).json()
+    assert again["set_id"] == view["id"] and again["changes"] == {"added": 0, "removed": 0, "moved": False}
+    assert api.post(f"/api/sets/{api.post('/api/sets', json={'name': 'ohne'}).json()['id']}/refresh").status_code == 400
+    for t in db.all_tracks():
+        if (t["spotify_id"] or "").startswith("pl_"):
+            db.delete_track(t["id"])
+    api.delete(f"/api/sets/{view['id']}")

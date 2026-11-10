@@ -42,6 +42,8 @@ export interface Rating {
   transitions: Transition[];
   counts: Record<Verdict, number>;
   energy: number[];
+  mood_score: number | null;
+  moods: string[];
 }
 export interface SetView {
   id: number;
@@ -52,6 +54,8 @@ export interface SetView {
   rating: Rating;
   duration: number;
   targets: (number | null)[];
+  spotify_playlist_id: string | null;
+  files: { local: number; analyzed: number; total: number };
   before?: number;
   after?: number;
 }
@@ -112,6 +116,10 @@ export interface Review {
   fixes: { index: number; issues: string[]; options: FixOption[] }[];
   pinned: number[];
   pending: number;
+  findings: Finding[];
+  mood_gain: number;
+  spotify_playlist_id: string | null;
+  focus_options: Record<string, string>;
 }
 
 export interface Status {
@@ -133,3 +141,6 @@ export interface TrackCue { pad: number; letter: string; name: string; kind: "cu
 export interface Phase { name: string; kind: string; time: number; end: number; label: string; bar: number; bars: number }
 export interface TrackDetail extends Track { cues: TrackCue[]; phases: Phase[] }
 export interface SpotifyCheck { ok: boolean; redirect_uri: string; steps: { name: string; ok: boolean; detail: string; hint?: string }[] }
+
+export interface Finding { kind: string; severity: "high" | "medium" | "info"; index: number; title: string; text: string; track_ids: number[] }
+export interface Changes { added: number; removed: number; moved: boolean }

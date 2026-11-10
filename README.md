@@ -33,8 +33,10 @@ unter **Releases**).
 | System | Datei | Installation |
 |---|---|---|
 | Mac mit Apple-Chip (M1 oder neuer) | `SetTracker-macOS-AppleSilicon.dmg` | öffnen, SetTracker auf „Programme“ ziehen |
-| Mac mit Intel-Prozessor | `SetTracker-macOS-Intel.dmg` | öffnen, SetTracker auf „Programme“ ziehen |
 | Windows 10/11 | `SetTracker-Setup.exe` | ausführen, keine Administratorrechte nötig |
+
+Für Macs mit Intel-Prozessor gibt es keinen Installer (eine der Audio-Bibliotheken bietet dafür keine
+fertigen Pakete mehr); dort funktioniert der Weg über Python weiter unten.
 
 Die Installer sind **nicht signiert** (dafür wären kostenpflichtige Entwicklerzertifikate nötig), deshalb
 warnt das System beim ersten Start:
@@ -97,6 +99,23 @@ Gut zu wissen:
   sind Zeitangaben und Hot Cues ein geschätztes 16-Takt-Raster zum Nachjustieren nach Gehör.
   Liegt ein Track lokal *und* in einer importierten Playlist, verknüpft SetTracker beide automatisch.
 - Audio aus Spotify herunterzuladen ist nicht möglich und nicht vorgesehen.
+
+## Empfohlener Ablauf: erst in Spotify planen, dann mit Dateien fertigstellen
+
+1. **Playlist in Spotify bauen** und unter *Playlist-Check → Spotify-Playlist* laden. SetTracker zeigt die
+   Wertung jedes Übergangs, den **Stimmungsverlauf** und eine Liste der **Auffälligkeiten**: Tempo-Ausreißer,
+   Temposprünge, Tonart-Clashs, Stimmungsbrüche, Energie-Löcher, Genre-Ausreißer, Tracks ohne Daten.
+2. **Umbau-Vorschlag ansehen.** Der Schwerpunkt ist wählbar – flüssige Übergänge, ausgewogen oder
+   Stimmungsverlauf. Übernimm ihn als neues Set oder ändere die Playlist in Spotify und klicke
+   **Aus Spotify aktualisieren**: Dasselbe Set wird neu geladen und erneut geprüft.
+3. **Sehen, was fehlt.** Im Set steht „x von y Tracks als Datei vorhanden“; die fehlenden Titel lassen sich
+   kopieren oder als CSV speichern. Die Dateien besorgst du selbst – SetTracker lädt nichts herunter.
+4. **Ordner mit den Dateien hinzufügen.** Passende Dateien werden dem Spotify-Eintrag automatisch zugeordnet
+   (gleiche ISRC oder gleicher Titel, Künstler und ähnliche Länge), der Track bleibt an seinem Platz im Set
+   und wird taktgenau analysiert. Passt ein Dateiname nicht, hilft in den Track-Details
+   „Vorhandene Datei von Hand zuordnen“; eine falsche Zuordnung lässt sich dort wieder lösen.
+5. **Exportieren.** Sind alle Tracks als Datei da, stimmen Hot Cues, Loops und Mix-Punkte taktgenau –
+   rekordbox-XML und Spickzettel exportieren.
 
 ## Hot Cues, Loops und Phasen
 

@@ -35,6 +35,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [detailId, openTrack] = useState<number | null>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
   const busy = useRef(false);
+  const lastSignature = useRef<string | null>(null);
 
   const refreshTracks = useCallback(async () => setTracks(await api.tracks()), []);
   const refreshSets = useCallback(async () => setSets(await api.sets()), []);
@@ -42,8 +43,12 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     const s = await api.status();
     setStatus(s);
     const nowBusy = s.analysis.running || s.spotify.job.running;
-    // Während Hintergrundarbeit laufend nachladen, danach einmal abschließend.
-    if (nowBusy || busy.current) {
+    // Während Hintergrundarbeit laufend nachladen, danach einmal abschließend – und auch dann,
+    // wenn sich der Zählerstand zwischen zwei Abfragen geändert hat (kurze Läufe).
+    const signature = `${s.analysis.total}:${s.analysis.done}:${s.spotify.job.phase}:${s.spotify.job.done}`;
+    const changed = lastSignature.current !== null && lastSignature.current !== signature;
+    lastSignature.current = signature;
+    if (nowBusy || busy.current || changed) {
       await refreshTracks();
       setDataVersion((v) => v + 1);
     }

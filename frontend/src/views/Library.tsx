@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { useStore } from "../store";
 import type { SpotifyCheck, SpotifyPlaylist, Track } from "../types";
-import { Button, Chip, cx, Empty, fmtBpm, fmtTime, IconButton, inputClass, KeyBadge, Menu, MenuItem, Meter, Modal, PageHeader, Select, SourceTag, TrackTitle, useAction } from "../ui";
+import { Button, Chip, cx, Empty, fmtBpm, fmtTime, IconButton, inputClass, KeyBadge, Menu, MenuItem, Meter, Modal, PageHeader, Select, SourceTag, TrackTitle, useAction, useToast } from "../ui";
 
 type SortKey = "title" | "family" | "bpm" | "camelot" | "energy" | "duration";
 const NONE = "__none__";
@@ -299,9 +299,10 @@ export function SetMenu({ sets, onPick, label, compact }: { sets: { id: number; 
   );
 }
 
-function FolderDialog({ onClose }: { onClose: () => void }) {
+export function FolderDialog({ onClose }: { onClose: () => void }) {
   const { refreshTracks, refreshStatus } = useStore();
   const run = useAction();
+  const toast = useToast();
   const [dir, setDir] = useState<{ path: string; parent: string | null; dirs: string[]; audio_files: number } | null>(null);
   const [path, setPath] = useState("");
   const [loading, setLoading] = useState(false);
@@ -317,6 +318,8 @@ function FolderDialog({ onClose }: { onClose: () => void }) {
     const result = await run(() => api.scan(path));
     setLoading(false);
     if (!result) return;
+    toast(result.found === 0 ? "Keine Audiodateien in diesem Ordner gefunden"
+      : `${result.found} Dateien gefunden` + (result.linked ? `, ${result.linked} davon Spotify-Tracks zugeordnet` : "") + " – Analyse läuft");
     await refreshTracks();
     await refreshStatus();
     onClose();
@@ -328,7 +331,7 @@ function FolderDialog({ onClose }: { onClose: () => void }) {
       <Button variant="ghost" onClick={onClose}>Abbrechen</Button>
       <Button variant="primary" loading={loading} onClick={scan}>Diesen Ordner analysieren</Button>
     </>}>
-      <p className="mb-3 text-[13px] text-muted">Alle Audiodateien im Ordner und seinen Unterordnern werden aufgenommen und analysiert. Die Dateien bleiben unverändert an ihrem Ort.</p>
+      <p className="mb-3 text-[13px] text-muted">Alle Audiodateien im Ordner und seinen Unterordnern werden aufgenommen und analysiert. Dateien, die zu einem Spotify-Track in deiner Bibliothek gehören, werden ihm automatisch zugeordnet. Die Dateien bleiben unverändert an ihrem Ort.</p>
       <form onSubmit={(e) => { e.preventDefault(); open(path); }} className="flex gap-2">
         <input value={path} onChange={(e) => setPath(e.target.value)} className={cx(inputClass, "flex-1 font-mono text-[13px]")} aria-label="Ordnerpfad" spellCheck={false} />
         <Button type="submit">Öffnen</Button>

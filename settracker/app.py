@@ -58,6 +58,8 @@ def set_view(s: dict) -> dict:
     rating = review_engine.rate(tracks, weights())
     return {
         "id": s["id"], "name": s["name"], "curve": s["curve"], "origin": s["origin"], "overrides": s["overrides"],
+        "spotify_playlist_id": s.get("spotify_playlist_id"),
+        "files": {"local": sum(1 for t in tracks if t["path"]), "analyzed": sum(1 for t in tracks if t["path"] and t["status"] == "done"), "total": len(tracks)},
         "items": [{"track": present(t), "pinned": t["id"] in pinned} for t in tracks],
         "rating": rating,
         "duration": sum(t["duration"] or 0 for t in tracks),
@@ -145,6 +147,42 @@ def patch_track(track_id: int, body: TrackPatch) -> dict:
         fields["family"] = genre_family(fields["genres"])
     db.update_track(track_id, **fields)
     return present(need_track(track_id))
+
+
+class Link(BaseModel):
+    other_id: int
+
+
+@app.get("/api/tracks/{track_id}/link-candidates")
+def link_candidates(track_id: int) -> list[dict]:
+    """Lokale Tracks ohne Spotify-Bezug, nach Ähnlichkeit zum Spotify-Eintrag sortiert."""
+    from .spotify.match import similarity
+
+    target = need_track(track_id)
+    pool = [t for t in db.all_tracks() if t["source"] == "local" and not t["spotify_id"]]
+    pool.sort(key=lambda t: -similarity(target, t))
+    return [present(t) for t in pool[:25]]
+
+
+@app.post("/api/tracks/{track_id}/link")
+def link_track(track_id: int, body: Link) -> dict:
+    need_track(track_id)
+    try:
+        library.merge(track_id, body.other_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return present(need_track(track_id))
+
+
+@app.post("/api/tracks/{track_id}/unlink")
+def unlink_track(track_id: int) -> dict:
+    need_track(track_id)
+    try:
+        new_id = library.unlink(track_id)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    importer.enrich_features([track_id])
+    return {"spotify": present(need_track(track_id)), "file_id": new_id}
 
 
 class Bulk(BaseModel):
@@ -329,20 +367,50 @@ class SpotifyImport(BaseModel):
     as_set: bool = False
 
 
+def _load_playlist(key: str) -> tuple[str, list[dict]]:
+    if key == "liked":
+        return "Lieblingssongs", spotify_call(spotify.liked_tracks)
+    return spotify_call(spotify.playlist_tracks, key)
+
+
+def _sync_set(s: dict, track_ids: list[int]) -> dict:
+    """Übernimmt Inhalt und Reihenfolge aus Spotify; Pins verbliebener Tracks bleiben."""
+    old = [i["track_id"] for i in s["items"]]
+    pinned = {i["track_id"] for i in s["items"] if i.get("pinned")}
+    new = list(dict.fromkeys(track_ids))
+    db.update_set(s["id"], items=[{"track_id": i, "pinned": i in pinned} for i in new])
+    kept_old, kept_new = [i for i in old if i in set(new)], [i for i in new if i in set(old)]
+    return {"added": len(set(new) - set(old)), "removed": len(set(old) - set(new)), "moved": kept_old != kept_new}
+
+
 @app.post("/api/spotify/import")
 def spotify_import(body: SpotifyImport) -> dict:
-    if body.liked:
-        name, items = "Lieblingssongs", spotify_call(spotify.liked_tracks)
-    elif body.playlist_id:
-        name, items = spotify_call(spotify.playlist_tracks, body.playlist_id)
-    else:
+    key = "liked" if body.liked else body.playlist_id
+    if not key:
         raise HTTPException(400, "playlist_id oder liked angeben")
+    name, items = _load_playlist(key)
     ids = importer.run_import(items, name)
     out = {"name": name, "count": len(ids)}
     if body.as_set:
-        unique = list(dict.fromkeys(ids))
-        out["set_id"] = db.create_set(name, [{"track_id": i} for i in unique], curve="free", origin=f"Spotify-Playlist „{name}“")["id"]
+        existing = next((s for s in db.list_sets() if s.get("spotify_playlist_id") == key), None)
+        if existing:
+            out.update(set_id=existing["id"], changes=_sync_set(existing, ids))
+        else:
+            unique = list(dict.fromkeys(ids))
+            out["set_id"] = db.create_set(name, [{"track_id": i} for i in unique], curve="free",
+                                          origin=f"Spotify-Playlist „{name}“", spotify_playlist_id=key)["id"]
     return out
+
+
+@app.post("/api/sets/{set_id}/refresh")
+def refresh_set(set_id: int) -> dict:
+    """Set erneut aus seiner Spotify-Playlist laden (nach Änderungen in Spotify)."""
+    s = need_set(set_id)
+    if not s.get("spotify_playlist_id"):
+        raise HTTPException(400, "Dieses Set stammt nicht aus einer Spotify-Playlist")
+    name, items = _load_playlist(s["spotify_playlist_id"])
+    changes = _sync_set(s, importer.run_import(items, name))
+    return {"changes": changes, "set": set_view(need_set(set_id))}
 
 
 class SpotifyTrack(BaseModel):
@@ -473,7 +541,7 @@ def transition(set_id: int, index: int, template: str | None = None) -> dict:
 
 
 @app.get("/api/sets/{set_id}/review")
-def review(set_id: int, curve: str = "free", pin_first: bool = False, pin_last: bool = False) -> dict:
+def review(set_id: int, curve: str = "free", pin_first: bool = False, pin_last: bool = False, focus: str = "balanced") -> dict:
     s = need_set(set_id)
     tracks = set_tracks(s)
     pinned_ids = {i["track_id"] for i in s["items"] if i.get("pinned")}
@@ -484,13 +552,14 @@ def review(set_id: int, curve: str = "free", pin_first: bool = False, pin_last: 
         pinned.add(len(tracks) - 1)
     in_set = {t["id"] for t in tracks}
     lib = [db.get_track(t["id"]) for t in db.all_tracks() if t["id"] not in in_set and t["status"] in ("done", "partial")]
-    result = review_engine.review(tracks, lib, curve, pinned, weights())
+    result = review_engine.review(tracks, lib, curve, pinned, weights(), focus)
     by_id = {t["id"]: present(t) for t in tracks + lib}
     for fix in result["fixes"]:
         for opt in fix["options"]:
             if opt["kind"] == "bridge":
                 opt["track"] = by_id[opt["track_id"]]
     return {**result, "tracks": [by_id[t["id"]] for t in tracks], "name": s["name"], "pinned": sorted(pinned),
+            "spotify_playlist_id": s.get("spotify_playlist_id"), "focus_options": review_engine.FOCUS_LABELS,
             "pending": sum(1 for t in tracks if t["status"] in ("pending", "analyzing"))}
 
 
@@ -568,6 +637,24 @@ def export_rekordbox(set_id: int) -> Response:
     cues = _set_cues(tracks, plans)
     phases = {t["id"]: cue_engine.phases(t) for t in tracks}
     return _download(rekordbox_xml.build(s["name"], tracks, cues, phases), "application/xml", s["name"], ".xml")
+
+
+@app.get("/api/sets/{set_id}/missing.csv")
+def missing_csv(set_id: int) -> Response:
+    """Tracks des Sets, die noch nicht als Audiodatei vorliegen."""
+    import csv
+    import io
+
+    s = need_set(set_id)
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter=";")
+    writer.writerow(["Platz", "Künstler", "Titel", "Album", "Dauer", "BPM", "ISRC", "Spotify"])
+    for pos, t in enumerate(set_tracks(s), 1):
+        if not t["path"]:
+            dur = int(t["duration"] or 0)
+            writer.writerow([pos, t["artist"], t["title"], t["album"], f"{dur // 60}:{dur % 60:02d}", t["bpm"] or "", t["isrc"] or "",
+                             f"https://open.spotify.com/track/{t['spotify_id']}" if t["spotify_id"] else ""])
+    return _download("\ufeff" + buf.getvalue(), "text/csv; charset=utf-8", f"{s['name']} fehlende Tracks", ".csv")
 
 
 @app.get("/api/sets/{set_id}/export/playlist.m3u")

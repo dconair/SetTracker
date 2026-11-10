@@ -1,9 +1,9 @@
-import { ArrowLeft, ArrowRight, ArrowRightLeft, Check as CheckIcon, FileUp, ListMusic, Loader2, Pin, ScanSearch, TrendingUp, Wand2 } from "lucide-react";
+import { ArrowLeft, ArrowRight, ArrowRightLeft, Check as CheckIcon, CircleAlert, FileUp, Info, ListMusic, Loader2, Pin, RefreshCw, ScanSearch, TrendingUp, TriangleAlert, Wand2 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { useStore } from "../store";
 import type { FixOption, Rating, Review, Track } from "../types";
-import { Button, Card, cx, Empty, fmtBpm, IconButton, KeyBadge, PageHeader, ScoreBadge, Select, useAction, verdictColor } from "../ui";
+import { Button, Card, cx, Empty, fmtBpm, IconButton, KeyBadge, changesText, moodColor, PageHeader, ScoreBadge, Select, useAction, useToast, verdictColor } from "../ui";
 import { SpotifyDialog, SpotifyLogo } from "./Library";
 import { EnergyChart } from "./SetBuilder";
 
@@ -70,16 +70,19 @@ function SourceCard({ icon, title, text, action }: { icon: React.ReactNode; titl
 }
 
 function CheckResult({ id }: { id: number }) {
-  const { status, go, refreshSets, dataVersion } = useStore();
+  const { status, go, refreshSets, refreshTracks, refreshStatus, dataVersion, openTrack } = useStore();
   const run = useAction();
+  const toast = useToast();
   const [curve, setCurve] = useState("free");
+  const [focus, setFocus] = useState("balanced");
+  const [refreshing, setRefreshing] = useState(false);
   const [pinFirst, setPinFirst] = useState(false);
   const [pinLast, setPinLast] = useState(false);
   const [review, setReview] = useState<Review | null>(null);
   const [missing, setMissing] = useState(false);
   const [applying, setApplying] = useState(false);
 
-  const load = useCallback(() => api.review(id, curve, pinFirst, pinLast).then(setReview).catch(() => setMissing(true)), [id, curve, pinFirst, pinLast]);
+  const load = useCallback(() => api.review(id, curve, pinFirst, pinLast, focus).then(setReview).catch(() => setMissing(true)), [id, curve, pinFirst, pinLast, focus]);
   useEffect(() => { load(); }, [load, dataVersion]);
 
   if (missing) return <Empty icon={<ScanSearch size={26} />} title="Playlist nicht gefunden" action={<Button onClick={() => go("check")}>Zurück</Button>} />;
@@ -94,6 +97,15 @@ function CheckResult({ id }: { id: number }) {
     const created = await run(() => api.applyOrder(id, review.order), "Umbau als neues Set gespeichert");
     setApplying(false);
     if (created) { await refreshSets(); go(`sets/${created.id}`); }
+  };
+  const refresh = async () => {
+    setRefreshing(true);
+    const r = await run(() => api.refreshSet(id));
+    setRefreshing(false);
+    if (!r) return;
+    toast(changesText(r.changes));
+    await Promise.all([refreshSets(), refreshTracks(), refreshStatus()]);
+    load();
   };
   const applyFix = async (opt: FixOption) => {
     const items = review.tracks.map((t, i) => ({ track_id: t.id, pinned: review.pinned.includes(i) }));
@@ -110,6 +122,7 @@ function CheckResult({ id }: { id: number }) {
         title={<span className="flex items-center gap-2"><IconButton label="Zurück" onClick={() => go("check")}><ArrowLeft size={18} /></IconButton>{review.name}</span>}
         subtitle={<span className="pl-10">Playlist-Check · {review.tracks.length} Tracks</span>}
       >
+        {review.spotify_playlist_id && <Button icon={<RefreshCw size={16} />} loading={refreshing} onClick={refresh} title="Playlist in Spotify geändert? Hier neu laden und erneut prüfen.">Aus Spotify aktualisieren</Button>}
         <Button onClick={() => go(`sets/${id}`)}>Im Set-Builder öffnen</Button>
       </PageHeader>
 
@@ -134,19 +147,48 @@ function CheckResult({ id }: { id: number }) {
               </div>
             </div>
             <p className="max-w-xl min-w-64 flex-1 text-muted">{review.summary}</p>
+            {review.before.mood_score !== null && (
+              <div className="text-right">
+                <div className="text-xs text-muted">Stimmungsverlauf</div>
+                <div className="num text-lg font-semibold" style={{ color: verdictColor[review.before.mood_score >= 0.72 ? "good" : review.before.mood_score >= 0.5 ? "ok" : "bad"] }}>{Math.round(review.before.mood_score * 100)}</div>
+              </div>
+            )}
           </div>
+          <MoodBand moods={review.before.moods} tracks={review.tracks} onOpen={openTrack} />
         </Card>
+
+        <section>
+          <h2 className="mb-3 font-semibold">Auffälligkeiten <span className="num ml-1 text-[13px] font-normal text-muted">{review.findings.length}</span></h2>
+          {review.findings.length === 0 ? (
+            <Card className="flex items-center gap-2.5 px-4 py-3.5 text-[13px]"><CheckIcon size={16} className="text-good" /> Nichts Auffälliges: Tempo, Tonarten, Stimmung und Genres passen durchgehend.</Card>
+          ) : (
+            <Card className="divide-y divide-line/70 overflow-hidden">
+              {review.findings.map((f, i) => (
+                <button key={i} onClick={() => openTrack(f.track_ids[0])} className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-hover" title="Track-Details öffnen">
+                  <span className="mt-0.5 shrink-0" style={{ color: f.severity === "high" ? "var(--bad)" : f.severity === "medium" ? "var(--ok)" : "var(--faint)" }}>
+                    {f.severity === "high" ? <CircleAlert size={16} /> : f.severity === "medium" ? <TriangleAlert size={16} /> : <Info size={16} />}
+                  </span>
+                  <span className="min-w-0 flex-1"><span className="block text-[13px] font-semibold">{f.title}</span><span className="block text-[13px] text-muted">{f.text}</span></span>
+                  <span className="num shrink-0 text-xs text-faint">Platz {f.index + 1}</span>
+                </button>
+              ))}
+            </Card>
+          )}
+        </section>
 
         <Card className="p-5">
           <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
             <div className="flex items-center gap-2 font-semibold"><Wand2 size={17} className="text-accent" /> Umbau-Vorschlag</div>
-            <label className="flex items-center gap-2 text-[13px] text-muted">Ziel
+            <label className="flex items-center gap-2 text-[13px] text-muted">Schwerpunkt
+              <Select value={focus} onChange={setFocus}>{Object.entries(review.focus_options).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select>
+            </label>
+            <label className="flex items-center gap-2 text-[13px] text-muted">Energiekurve
               <Select value={curve} onChange={setCurve}>{Object.entries(status?.curves ?? {}).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select>
             </label>
             <Toggle checked={pinFirst} onChange={setPinFirst}>Erster Track bleibt</Toggle>
             <Toggle checked={pinLast} onChange={setPinLast}>Letzter Track bleibt</Toggle>
             <div className="ml-auto flex items-center gap-3">
-              {review.recommend_rebuild && <span className="flex items-center gap-1.5 text-[13px] font-medium text-good"><TrendingUp size={15} /> +{Math.round(review.gain * 100)} Punkte</span>}
+              {review.recommend_rebuild && <span className="flex items-center gap-1.5 text-[13px] font-medium text-good"><TrendingUp size={15} /> {review.gain >= 0.005 ? `+${Math.round(review.gain * 100)} Punkte` : ""}{review.mood_gain >= 0.03 ? `${review.gain >= 0.005 ? " · " : ""}Stimmung +${Math.round(review.mood_gain * 100)}` : ""}</span>}
               <Button variant="primary" loading={applying} disabled={review.moved.length === 0} onClick={applyRebuild} title="Speichert die neue Reihenfolge als eigenes Set – das Original bleibt unverändert">Umbau als neues Set übernehmen</Button>
             </div>
           </div>
@@ -201,6 +243,28 @@ function CheckResult({ id }: { id: number }) {
   );
 }
 
+/** Ein Farbsegment je Track nach Stimmung – zeigt Brüche im Verlauf auf einen Blick. */
+function MoodBand({ moods, tracks, onOpen, compact }: { moods: string[]; tracks: Track[]; onOpen?: (id: number) => void; compact?: boolean }) {
+  const used = [...new Set(moods.filter(Boolean))];
+  if (!used.length) return null;
+  return (
+    <div className={compact ? "mt-1.5" : "mt-5"}>
+      <div className={cx("flex gap-0.5 overflow-hidden rounded-full", compact ? "h-1.5" : "h-2.5")}>
+        {moods.map((m, i) => (
+          <button key={i} disabled={!onOpen} onClick={() => onOpen?.(tracks[i].id)} title={`${i + 1}. ${tracks[i].title} – ${m || "Stimmung unbekannt"}`}
+            className="h-full flex-1 transition-opacity hover:opacity-70 disabled:cursor-default disabled:hover:opacity-100" style={{ background: moodColor(m) }} />
+        ))}
+      </div>
+      {!compact && (
+        <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
+          <span className="font-medium text-text">Stimmung je Track</span>
+          {used.map((m) => <span key={m} className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: moodColor(m) }} />{m}</span>)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ScoreRing({ score, color }: { score: number; color: string }) {
   const r = 30, c = 2 * Math.PI * r;
   return (
@@ -229,7 +293,7 @@ function OrderColumn({ title, rating, tracks, moved, highlight }: { title: strin
         <span className="text-[13px] font-semibold">{title}</span>
         <ScoreBadge score={rating.overall} verdict={rating.verdict} />
       </div>
-      <div className="mb-2 px-1"><EnergyChart energy={rating.energy} height={36} /></div>
+      <div className="mb-2 px-1"><EnergyChart energy={rating.energy} height={36} /><MoodBand moods={rating.moods} tracks={tracks} compact /></div>
       {tracks.map((t, i) => (
         <div key={t.id}>
           <div className={cx("flex items-center gap-2.5 rounded-lg px-2 py-1.5", highlight && moved.has(t.id) && "bg-accent-soft")}>

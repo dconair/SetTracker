@@ -1,9 +1,9 @@
-import { Pause, Play, Repeat, TriangleAlert, X } from "lucide-react";
+import { Link2, Link2Off, Pause, Play, Repeat, TriangleAlert, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useStore } from "../store";
-import type { TrackDetail, WaveData } from "../types";
-import { fmtBpm, fmtTime, IconButton, KeyBadge, SourceTag } from "../ui";
+import type { Track, TrackDetail, WaveData } from "../types";
+import { Button, fmtBpm, fmtTime, IconButton, KeyBadge, SourceTag, useAction } from "../ui";
 import { Waveform, type Marker } from "../Waveform";
 
 export const cueColor = (name: string) =>
@@ -12,21 +12,37 @@ export const cueColor = (name: string) =>
 
 /** Track-Details: ganze Waveform mit beschrifteten Phasen, Hot Cues und Loops. */
 export function TrackPanel({ id, onClose }: { id: number; onClose: () => void }) {
-  const { playing, togglePlay } = useStore();
+  const { playing, togglePlay, refreshTracks, refreshStatus, dataVersion } = useStore();
+  const run = useAction();
   const [track, setTrack] = useState<TrackDetail | null>(null);
   const [wave, setWave] = useState<WaveData | null>(null);
+  const [candidates, setCandidates] = useState<Track[] | null>(null);
+  const [version, setVersion] = useState(0);
 
+  const changed = async () => { setCandidates(null); await Promise.all([refreshTracks(), refreshStatus()]); setVersion((v) => v + 1); };
+  const link = async (other: Track) => { if (await run(() => api.linkTrack(id, other.id), "Datei zugeordnet")) changed(); };
+  const unlink = async () => { if (await run(() => api.unlinkTrack(id), "Verknüpfung gelöst")) changed(); };
+
+  // Nur beim Wechsel des Tracks zurücksetzen – nicht bei jeder Hintergrund-Aktualisierung.
   useEffect(() => {
     setTrack(null);
     setWave(null);
+    setCandidates(null);
+  }, [id]);
+
+  useEffect(() => {
     api.track(id).then((t) => {
       setTrack(t);
       if (t.has_analysis) api.waveform(id).then(setWave).catch(() => {});
+      else setWave(null);
     });
+  }, [id, version, dataVersion]);
+
+  useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [id, onClose]);
+  }, [onClose]);
 
   const markers: Marker[] = (track?.cues ?? []).map((c) => ({ time: c.time, label: `${c.pad}`, color: cueColor(c.name) }));
   const estimated = track?.cues[0]?.estimated;
@@ -73,9 +89,27 @@ export function TrackPanel({ id, onClose }: { id: number; onClose: () => void })
                 <span>
                   <b className="font-medium text-text">Nur bei Spotify – keine Audiodatei.</b> Spotify gibt weder Audio noch Strukturdaten heraus, deshalb lassen sich
                   Intro, Drop und Break hier nicht erkennen. Die Marken unten sind ein <b className="font-medium text-text">Raster alle 16 Takte</b> als Orientierung;
-                  setze sie in rekordbox nach Gehör. Liegt der Track als Datei vor, füge den Ordner hinzu – dann wird er taktgenau analysiert.
+                  setze sie in rekordbox nach Gehör. Liegt der Track als Datei vor, füge den Ordner hinzu – dann wird er automatisch zugeordnet und taktgenau analysiert.
+                  <span className="mt-2.5 block">
+                    <Button size="sm" icon={<Link2 size={15} />} onClick={async () => setCandidates((await run(() => api.linkCandidates(id))) ?? [])}>Vorhandene Datei von Hand zuordnen</Button>
+                  </span>
                 </span>
               </div>
+            )}
+            {candidates && (
+              <section className="rounded-xl border border-line bg-surface p-2">
+                <div className="px-2 pt-1.5 pb-2 text-[13px] text-muted">Welche Datei ist dieser Track? (ähnlichste zuerst)</div>
+                {candidates.length === 0 ? <div className="px-2 pb-3 text-[13px] text-faint">Keine lokalen Tracks ohne Spotify-Zuordnung vorhanden.</div> : (
+                  <div className="max-h-56 overflow-y-auto">
+                    {candidates.map((c) => (
+                      <button key={c.id} onClick={() => link(c)} className="flex w-full items-center gap-3 rounded-lg px-2 py-1.5 text-left hover:bg-hover">
+                        <span className="min-w-0 flex-1"><span className="block truncate text-[13px] font-medium">{c.title}</span><span className="block truncate text-xs text-muted">{c.artist || "Unbekannt"}</span></span>
+                        <span className="num font-mono text-xs text-muted">{fmtBpm(c.bpm)} · {fmtTime(c.duration)}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
             )}
 
             <section>
@@ -114,6 +148,13 @@ export function TrackPanel({ id, onClose }: { id: number; onClose: () => void })
                 oder verdoppelst du die Länge, mit <b className="font-medium">4 BEAT/EXIT</b> (bzw. RELOOP/EXIT) läuft der Track normal weiter. LOOP INTRO verlängert ein kurzes Intro beim
                 Reinmixen, LOOP OUTRO hält den Beat, bis der nächste Track sitzt.
               </section>
+            )}
+            {track.path && track.spotify_id && (
+              <div className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-[13px] text-muted">
+                <Link2 size={16} className="shrink-0 text-accent" />
+                <span className="min-w-0 flex-1 truncate" title={track.path}>Mit Spotify verknüpft · Datei: {track.path.split(/[\\/]/).pop()}</span>
+                <Button size="sm" variant="ghost" icon={<Link2Off size={15} />} onClick={unlink} title="Falls die falsche Datei zugeordnet wurde: Datei und Spotify-Eintrag wieder trennen">Verknüpfung lösen</Button>
+              </div>
             )}
             <div className="text-xs text-faint">Dauer {fmtTime(track.duration)}{track.genres.length > 0 && ` · ${track.genres.slice(0, 4).join(", ")}`}</div>
           </div>

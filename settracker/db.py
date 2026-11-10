@@ -71,6 +71,8 @@ def conn() -> sqlite3.Connection:
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA journal_mode=WAL")
     c.executescript(SCHEMA)
+    if "spotify_playlist_id" not in {r["name"] for r in c.execute("PRAGMA table_info(sets)")}:
+        c.execute("ALTER TABLE sets ADD COLUMN spotify_playlist_id TEXT")  # Datenbanken älterer Versionen
     _local.conn, _local.path = c, path
     return c
 
@@ -172,12 +174,13 @@ def _set(row: sqlite3.Row | None) -> dict | None:
     return d
 
 
-def create_set(name: str, items: list[dict] | None = None, curve: str = "build", origin: str = "") -> dict:
+def create_set(name: str, items: list[dict] | None = None, curve: str = "build", origin: str = "",
+               spotify_playlist_id: str | None = None) -> dict:
     now = time.time()
     c = conn()
     cur = c.execute(
-        "INSERT INTO sets (name, curve, items, origin, created, updated) VALUES (?, ?, ?, ?, ?, ?)",
-        (name, curve, json.dumps(items or []), origin, now, now),
+        "INSERT INTO sets (name, curve, items, origin, spotify_playlist_id, created, updated) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (name, curve, json.dumps(items or []), origin, spotify_playlist_id, now, now),
     )
     c.commit()
     return get_set(int(cur.lastrowid))  # type: ignore[return-value]

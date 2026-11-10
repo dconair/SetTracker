@@ -127,3 +127,39 @@ def test_set_cues_take_mix_points_from_transitions(lib):
     assert out[8] == "MIX OUT" and out[7] == "BASS SWAP" and out[6] == "LOOP OUTRO" and out[1] == "INTRO"
     into = {c["pad"]: c["name"] for c in cues.set_cues(b, plan, None)}
     assert into[1] == "MIX IN" and into[2] == "DROP" and into[5] == "LOOP INTRO"
+
+
+def _t(i, bpm, camelot, energy, valence, family="House"):
+    return {"id": i, "title": f"T{i}", "artist": "", "bpm": bpm, "camelot": camelot, "energy": energy, "valence": valence,
+            "family": family, "genres": [], "analysis": None}
+
+
+def test_findings_name_each_problem_once():
+    tracks = [
+        _t(1, 124, "8A", 0.60, 0.60), _t(2, 125, "8A", 0.62, 0.62), _t(3, 150, "9A", 0.64, 0.60),   # Tempo-Ausreißer
+        _t(4, 126, "9A", 0.66, 0.62), _t(5, 126, "3A", 0.66, 0.60),                                  # Tonart-Clash 9A→3A
+        _t(6, 127, "3A", 0.20, 0.12), _t(7, 127, "3A", 0.68, 0.14, "Techno"), _t(8, 128, "4A", 0.70, 0.16),
+        {**_t(9, None, None, None, None), "family": ""},
+    ]
+    result = review.findings(tracks, review.rate(tracks))
+    kinds = [(f["kind"], f["index"]) for f in result]
+    assert ("tempo_outlier", 2) in kinds and not any(k == "tempo_jump" and i in (1, 2) for k, i in kinds)
+    assert ("key_clash", 3) in kinds and ("mood_break", 4) in kinds
+    assert ("energy_dip", 5) in kinds and ("no_data", 8) in kinds
+    assert len(kinds) == len(set(kinds))
+    assert result[0]["severity"] == "high" and "150 BPM" in result[0]["text"]
+    clean = [_t(1, 124, "8A", 0.6, 0.6), _t(2, 125, "8A", 0.62, 0.6), _t(3, 126, "9A", 0.65, 0.62)]
+    assert review.findings(clean, review.rate(clean)) == []
+
+
+def test_genre_outlier_and_mood_focus_orders_by_mood():
+    tracks = [_t(1, 124, "8A", 0.6, 0.6), _t(2, 124, "8A", 0.6, 0.6, "Hip-Hop"), _t(3, 124, "8A", 0.6, 0.6)]
+    assert [f["kind"] for f in review.findings(tracks, review.rate(tracks))] == ["genre_outlier"]
+
+    # Gleiches Tempo/Tonart/Genre – nur die Stimmung springt: mit Stimmungsgewicht wird sie geglättet.
+    mixed = [_t(i, 124, "8A", 0.6, v) for i, v in enumerate([0.1, 0.9, 0.2, 0.8, 0.15, 0.85])]
+    jumps = lambda order: sum(abs(mixed[a]["valence"] - mixed[b]["valence"]) for a, b in zip(order, order[1:]))  # noqa: E731
+    with_mood = sequence.optimize(mixed, "free", mood_weight=0.5)["order"]
+    assert jumps(with_mood) < jumps(list(range(6))) / 2
+    r = review.review(mixed, [], focus="mood")
+    assert r["recommend_rebuild"] and r["after"]["mood_score"] > r["before"]["mood_score"] and r["mood_gain"] > 0.2
