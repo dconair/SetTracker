@@ -5,7 +5,6 @@ __pycache__/
 .pytest_cache/
 node_modules/
 frontend/dist/
-settracker/static/
 data/
 *.db
 .cache*
