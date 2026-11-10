@@ -1,21 +1,24 @@
 import { ChevronLeft, ChevronRight, Info, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
+import { Flx4 } from "../Flx4";
 import { useStore } from "../store";
 import type { Plan, Track, TransitionDetail, WaveData } from "../types";
 import { Button, cx, fmtBpm, IconButton, KeyBadge, ScoreBadge, verdictColor } from "../ui";
 import { Waveform, type Marker } from "../Waveform";
+import { cueColor } from "./TrackPanel";
 
-const CUE_COLOR: Record<string, string> = { "MIX IN": "#3ecf8e", DROP: "#ffa23e", "BASS SWAP": "#4db8ff", "MIX OUT": "#f2617a" };
 
 /** Seitenleiste mit Übergangsplan: ausgerichtete Waveforms, Marken und FLX4-Schritte. */
 export function TransitionPanel({ setId, index, total, onClose, onNavigate }: { setId: number; index: number; total: number; onClose: () => void; onNavigate: (i: number) => void }) {
   const { status } = useStore();
   const [detail, setDetail] = useState<TransitionDetail | null>(null);
   const [waves, setWaves] = useState<{ a: WaveData | null; b: WaveData | null }>({ a: null, b: null });
+  const [stepIndex, setStepIndex] = useState(0);
 
   useEffect(() => {
     setDetail(null);
+    setStepIndex(0);
     setWaves({ a: null, b: null });
     api.transition(setId, index).then((d) => {
       setDetail(d);
@@ -34,7 +37,7 @@ export function TransitionPanel({ setId, index, total, onClose, onNavigate }: { 
     return () => window.removeEventListener("keydown", onKey);
   }, [index, total, onClose, onNavigate]);
 
-  const choose = (template: string) => api.transition(setId, index, template).then(setDetail);
+  const choose = (template: string) => api.transition(setId, index, template).then((d) => { setDetail(d); setStepIndex(0); });
   const plan = detail?.plan;
 
   return (
@@ -79,7 +82,7 @@ export function TransitionPanel({ setId, index, total, onClose, onNavigate }: { 
               {plan.precise && (
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line px-4 py-2.5 text-[11px] text-muted">
                   <Legend color="var(--wave-low)" label="Bass" /><Legend color="var(--wave-mid)" label="Mitten" /><Legend color="var(--wave-high)" label="Höhen" />
-                  <span className="ml-auto">Blau hinterlegt: Überblend-Bereich ({plan.bars} Takte) · Linien alle 4 Takte</span>
+                  <span className="ml-auto">Farbig hinterlegt: Überblend-Bereich ({plan.bars} Takte) · Linien alle 4 Takte</span>
                 </div>
               )}
             </section>
@@ -102,17 +105,31 @@ export function TransitionPanel({ setId, index, total, onClose, onNavigate }: { 
                 <h3 className="font-semibold">Schritt für Schritt am DDJ-FLX4</h3>
                 <Button size="sm" variant="ghost" onClick={() => window.open(`/api/sets/${setId}/export/cheatsheet.html`, "_blank")}>Spickzettel öffnen</Button>
               </div>
-              <ol className="overflow-hidden rounded-xl border border-line bg-surface">
+              <div className="sticky top-0 z-10 rounded-xl border border-line bg-surface p-3" style={{ boxShadow: "var(--shadow)" }}>
+                <Flx4 active={plan.steps[stepIndex]?.controls ?? []} />
+                <div className="mt-2 flex items-center gap-3">
+                  <Button size="sm" disabled={stepIndex === 0} onClick={() => setStepIndex(stepIndex - 1)} icon={<ChevronLeft size={15} />}>Zurück</Button>
+                  <div className="min-w-0 flex-1 text-center text-[13px]">
+                    <span className="font-semibold text-accent">Schritt {stepIndex + 1}/{plan.steps.length} · {plan.steps[stepIndex]?.when}</span>
+                    {plan.steps[stepIndex]?.controls.length === 0 && <span className="text-faint"> · kein Bedienelement</span>}
+                  </div>
+                  <Button size="sm" variant="primary" disabled={stepIndex >= plan.steps.length - 1} onClick={() => setStepIndex(stepIndex + 1)}>Weiter <ChevronRight size={15} /></Button>
+                </div>
+              </div>
+              <ol className="mt-3 overflow-hidden rounded-xl border border-line bg-surface">
                 {plan.steps.map((step, i) => (
-                  <li key={i} className="flex gap-3 border-b border-line/70 px-4 py-3 last:border-0">
-                    <span className="num mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-hover text-[11px] font-semibold text-muted">{i + 1}</span>
-                    <div className="min-w-0 flex-1">
-                      <div className="mb-0.5 flex items-center gap-2 text-xs">
-                        <span className="font-semibold text-accent">{step.when}</span>
-                        {step.deck && <span className="rounded bg-hover px-1.5 py-px font-medium text-muted">Deck {step.deck}</span>}
-                      </div>
-                      <div className="text-[13px] leading-relaxed">{step.text}</div>
-                    </div>
+                  <li key={i}>
+                    <button onClick={() => setStepIndex(i)} aria-current={i === stepIndex ? "step" : undefined}
+                      className={cx("flex w-full gap-3 border-b border-line/70 px-4 py-3 text-left transition-colors", i === stepIndex ? "bg-accent-soft" : "hover:bg-hover")}>
+                      <span className={cx("num mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold", i === stepIndex ? "bg-accent text-accent-fg" : "bg-hover text-muted")}>{i + 1}</span>
+                      <span className="min-w-0 flex-1">
+                        <span className="mb-0.5 flex items-center gap-2 text-xs">
+                          <span className="font-semibold text-accent">{step.when}</span>
+                          {step.deck && <span className="rounded bg-hover px-1.5 py-px font-medium text-muted">Deck {step.deck}</span>}
+                        </span>
+                        <span className="block text-[13px] leading-relaxed">{step.text}</span>
+                      </span>
+                    </button>
                   </li>
                 ))}
               </ol>
@@ -137,7 +154,7 @@ function DeckWave({ deck, track, wave, plan, side, other }: { deck: number; trac
     const anchor = side === "a" ? plan.mix_out.time : plan.mix_in.time;
     const start = anchor - lead * wave.bar_len;
     const cues = side === "a" ? plan.cues_a : plan.cues_b;
-    const markers: Marker[] = cues.map((c) => ({ time: c.time, label: `${c.name} · Pad ${c.pad}`, color: CUE_COLOR[c.name] ?? "#fff" }));
+    const markers: Marker[] = cues.map((c) => ({ time: c.time, label: `${c.name} · Pad ${c.pad}`, color: cueColor(c.name) }));
     return { start, end: start + span * wave.bar_len, markers, highlight: { start: anchor, end: anchor + Math.max(plan.bars, 1) * wave.bar_len } };
   }, [wave, plan, side]);
 
@@ -165,7 +182,7 @@ function DeckWave({ deck, track, wave, plan, side, other }: { deck: number; trac
       {view && (
         <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted">
           {(side === "a" ? plan.cues_a : plan.cues_b).map((c) => (
-            <span key={c.name} className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: CUE_COLOR[c.name] }} /><b className="font-medium text-text">{c.name}</b><span className="num font-mono">{c.label}</span></span>
+            <span key={c.name} className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: cueColor(c.name) }} /><b className="font-medium text-text">{c.name}</b><span className="num font-mono">{c.label}</span></span>
           ))}
         </div>
       )}

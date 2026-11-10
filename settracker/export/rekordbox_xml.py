@@ -5,7 +5,12 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from urllib.parse import quote, unquote, urlparse
 
-CUE_COLORS = {"MIX IN": (40, 226, 20), "DROP": (255, 140, 0), "BASS SWAP": (0, 176, 255), "MIX OUT": (230, 40, 40)}
+CUE_COLORS = {"MIX IN": (40, 226, 20), "INTRO": (40, 226, 20), "START": (40, 226, 20), "DROP": (255, 140, 0),
+              "BREAK": (170, 110, 255), "LOOP": (255, 220, 0), "BASS SWAP": (0, 176, 255), "MIX OUT": (230, 40, 40), "OUTRO": (230, 40, 40)}
+
+
+def _color(name: str) -> tuple[int, int, int]:
+    return next((c for key, c in CUE_COLORS.items() if name.startswith(key)), (200, 200, 200))
 KINDS = {".mp3": "MP3 File", ".wav": "WAV File", ".flac": "FLAC File", ".m4a": "M4A File", ".aiff": "AIFF File", ".aif": "AIFF File"}
 
 
@@ -14,8 +19,12 @@ def location(path: str) -> str:
     return "file://localhost/" + quote(posix.lstrip("/"), safe="/:")
 
 
-def build(name: str, tracks: list[dict], cues: dict[int, list[dict]]) -> str:
-    """XML für die lokalen Tracks eines Sets. `cues`: Track-ID → [{pad, name, time}]."""
+def build(name: str, tracks: list[dict], cues: dict[int, list[dict]], phases: dict[int, list[dict]] | None = None) -> str:
+    """XML für die lokalen Tracks eines Sets.
+
+    `cues`: Track-ID → Hot Cues [{pad, name, time, end?}] (mit `end` als Loop).
+    `phases`: Track-ID → Abschnitte [{name, time}], landen als beschriftete Memory Cues im Track.
+    """
     local = [t for t in tracks if t.get("path")]
     root = ET.Element("DJ_PLAYLISTS", Version="1.0.0")
     ET.SubElement(root, "PRODUCT", Name="rekordbox", Version="6.0.0", Company="AlphaTheta")
@@ -34,10 +43,16 @@ def build(name: str, tracks: list[dict], cues: dict[int, list[dict]]) -> str:
         an = t.get("analysis")
         if an and t.get("bpm"):
             ET.SubElement(el, "TEMPO", Inizio=f"{an['first_downbeat']:.3f}", Bpm=f"{t['bpm']:.2f}", Metro="4/4", Battito="1")
+        for ph in (phases or {}).get(t["id"], []):
+            r, g, b = _color(ph["name"])
+            ET.SubElement(el, "POSITION_MARK", Name=ph["name"], Type="0", Start=f"{ph['time']:.3f}", Num="-1",
+                          Red=str(r), Green=str(g), Blue=str(b))
         for cue in sorted(cues.get(t["id"], []), key=lambda c: c["pad"]):
-            r, g, b = CUE_COLORS.get(cue["name"], (200, 200, 200))
-            ET.SubElement(el, "POSITION_MARK", Name=cue["name"], Type="0", Start=f"{cue['time']:.3f}",
-                          Num=str(cue["pad"] - 1), Red=str(r), Green=str(g), Blue=str(b))
+            r, g, b = _color(cue["name"])
+            attrs = {"Name": cue["name"], "Type": "4" if cue.get("end") else "0", "Start": f"{cue['time']:.3f}"}
+            if cue.get("end"):
+                attrs["End"] = f"{cue['end']:.3f}"
+            ET.SubElement(el, "POSITION_MARK", **attrs, Num=str(cue["pad"] - 1), Red=str(r), Green=str(g), Blue=str(b))
     playlists = ET.SubElement(root, "PLAYLISTS")
     node = ET.SubElement(playlists, "NODE", Type="0", Name="ROOT", Count="1")
     pl = ET.SubElement(node, "NODE", Name=name, Type="1", KeyType="0", Entries=str(len(local)))

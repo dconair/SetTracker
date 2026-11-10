@@ -1,4 +1,4 @@
-import type { Review, SetInfo, SetView, SpotifyPlaylist, Status, Suggestion, Track, TransitionDetail, WaveData } from "./types";
+import type { SpotifyCheck, TrackDetail, Review, SetInfo, SetView, SpotifyPlaylist, Status, Suggestion, Track, TransitionDetail, WaveData } from "./types";
 
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -29,6 +29,8 @@ const q = (params: Record<string, string | number | boolean | undefined | null>)
 export const api = {
   status: () => call<Status>("GET", "/api/status"),
   tracks: () => call<Track[]>("GET", "/api/tracks"),
+  track: (id: number) => call<TrackDetail>("GET", `/api/tracks/${id}`),
+  spotifyCheck: () => call<SpotifyCheck>("GET", "/api/spotify/check"),
   waveform: (id: number) => call<WaveData>("GET", `/api/tracks/${id}/waveform`),
   patchTrack: (id: number, body: Partial<Pick<Track, "family" | "bpm" | "camelot">>) => call<Track>("PATCH", `/api/tracks/${id}`, body),
   bulk: (ids: number[], body: { family?: string; delete?: boolean }) => call("POST", "/api/tracks/bulk", { ids, ...body }),
@@ -38,6 +40,8 @@ export const api = {
   fs: (path: string) => call<{ path: string; parent: string | null; dirs: string[]; audio_files: number }>("GET", `/api/fs${q({ path })}`),
 
   spotifyLogin: () => call<{ url: string }>("GET", "/api/spotify/login"),
+  spotifyCredentials: (client_id: string, client_secret: string) => call("POST", "/api/spotify/credentials", { client_id, client_secret }),
+  quit: () => call("POST", "/api/quit", { confirm: true }),
   spotifyLogout: () => call("POST", "/api/spotify/logout"),
   spotifyPlaylists: () => call<SpotifyPlaylist[]>("GET", "/api/spotify/playlists"),
   spotifyImport: (body: { playlist_id?: string; liked?: boolean; as_set?: boolean }) =>

@@ -116,7 +116,7 @@ export function Waveform({ data, start = 0, end, height = 96, markers = [], high
     const observer = new ResizeObserver(draw);
     observer.observe(canvas);
     const themeObserver = new MutationObserver(draw);
-    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "data-wave", "style"] });
     return () => {
       observer.disconnect();
       themeObserver.disconnect();

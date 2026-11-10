@@ -2,7 +2,7 @@ import { ArrowDown, ArrowUp, ChevronRight, CornerLeftUp, Folder, FolderPlus, Hea
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { useStore } from "../store";
-import type { SpotifyPlaylist, Track } from "../types";
+import type { SpotifyCheck, SpotifyPlaylist, Track } from "../types";
 import { Button, Chip, cx, Empty, fmtBpm, fmtTime, IconButton, inputClass, KeyBadge, Menu, MenuItem, Meter, Modal, PageHeader, Select, SourceTag, TrackTitle, useAction } from "../ui";
 
 type SortKey = "title" | "family" | "bpm" | "camelot" | "energy" | "duration";
@@ -20,7 +20,7 @@ export function SpotifyLogo({ size = 16 }: { size?: number }) {
 }
 
 export function Library() {
-  const { tracks, status, sets, refreshTracks, refreshSets, refreshStatus, playing, togglePlay, go } = useStore();
+  const { tracks, status, sets, refreshTracks, refreshSets, refreshStatus, playing, togglePlay, go, openTrack } = useStore();
   const run = useAction();
   const [family, setFamily] = useState("");
   const [source, setSource] = useState("");
@@ -235,7 +235,7 @@ export function Library() {
                         </td>
                         <td className="max-w-0 w-[34%] px-3 py-2">
                           <div className="flex items-center gap-2.5">
-                            <TrackTitle track={t} />
+                            <TrackTitle track={t} onOpen={() => openTrack(t.id)} />
                             <SourceTag track={t} />
                           </div>
                         </td>
@@ -352,7 +352,14 @@ export function SpotifyDialog({ onClose, asSet, onImported }: { onClose: () => v
   const run = useAction();
   const [playlists, setPlaylists] = useState<SpotifyPlaylist[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [check, setCheck] = useState<SpotifyCheck | null>(null);
+  const [checking, setChecking] = useState(false);
   const sp = status?.spotify;
+  const runCheck = async () => {
+    setChecking(true);
+    setCheck((await run(() => api.spotifyCheck())) ?? null);
+    setChecking(false);
+  };
 
   useEffect(() => {
     if (sp?.user) run(() => api.spotifyPlaylists()).then((p) => setPlaylists(p ?? []));
@@ -370,18 +377,15 @@ export function SpotifyDialog({ onClose, asSet, onImported }: { onClose: () => v
   return (
     <Modal title={<span className="flex items-center gap-2"><SpotifyLogo size={18} /> {asSet ? "Spotify-Playlist prüfen" : "Aus Spotify importieren"}</span>} onClose={onClose} wide>
       {!sp?.configured ? (
-        <div className="space-y-3 text-[13px] text-muted">
-          <p className="text-text">Es sind noch keine Spotify-Zugangsdaten hinterlegt.</p>
-          <ol className="list-decimal space-y-1.5 pl-5">
-            <li>Unter developer.spotify.com/dashboard eine App anlegen (Spotify Premium nötig).</li>
-            <li>Als Redirect URI eintragen: <code className="rounded bg-hover px-1.5 py-0.5 font-mono text-xs text-text">{sp?.redirect_uri}</code></li>
-            <li>Client ID und Client Secret in die Datei <code className="rounded bg-hover px-1.5 py-0.5 font-mono text-xs text-text">.env</code> eintragen und SetTracker neu starten.</li>
-          </ol>
-        </div>
+        <CredentialsForm redirectUri={sp?.redirect_uri ?? ""} onSaved={refreshStatus} />
       ) : !sp.user ? (
         <div className="flex flex-col items-center py-6 text-center">
           <p className="max-w-sm text-muted">Melde dich an, damit SetTracker deine Playlists und Lieblingssongs lesen und fertige Sets als Playlist anlegen kann.</p>
           <Button variant="primary" className="mt-5" icon={<SpotifyLogo />} onClick={async () => { const r = await run(() => api.spotifyLogin()); if (r) window.location.href = r.url; }}>Mit Spotify anmelden</Button>
+          <p className="mt-5 max-w-md text-xs text-faint">
+            Meldet Spotify „INVALID_CLIENT: Invalid redirect URI“? Dann fehlt in deiner Spotify-App unter „Redirect URIs“ genau diese Adresse:{" "}
+            <code className="rounded bg-hover px-1.5 py-0.5 font-mono text-text select-all">{sp.redirect_uri}</code>
+          </p>
         </div>
       ) : (
         <>
@@ -401,7 +405,65 @@ export function SpotifyDialog({ onClose, asSet, onImported }: { onClose: () => v
           </div>
         </>
       )}
+      {sp?.configured && (
+        <div className="mt-5 border-t border-line pt-4">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-[13px] text-muted">Funktioniert etwas nicht?</span>
+            <Button size="sm" loading={checking} onClick={runCheck}>Verbindung prüfen</Button>
+          </div>
+          {check && (
+            <ul className="mt-3 space-y-2">
+              {check.steps.map((st) => (
+                <li key={st.name} className="flex items-start gap-2.5 text-[13px]">
+                  <span className="mt-1 h-2 w-2 shrink-0 rounded-full" style={{ background: st.ok ? "var(--good)" : "var(--bad)" }} />
+                  <span className="min-w-0">
+                    <span className="font-medium">{st.name}</span>{st.ok && st.detail && <span className="text-muted"> · {st.detail}</span>}
+                    {!st.ok && <span className="block text-muted">{st.hint}{st.detail && <span className="block font-mono text-xs text-faint">{st.detail}</span>}</span>}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </Modal>
+  );
+}
+
+function CredentialsForm({ redirectUri, onSaved }: { redirectUri: string; onSaved: () => Promise<void> }) {
+  const run = useAction();
+  const [id, setId] = useState("");
+  const [secret, setSecret] = useState("");
+  const [saving, setSaving] = useState(false);
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    const ok = await run(() => api.spotifyCredentials(id, secret), "Zugangsdaten gespeichert");
+    setSaving(false);
+    if (ok) await onSaved();
+  };
+  return (
+    <form onSubmit={save} className="space-y-4 text-[13px]">
+      <p className="text-muted">Spotify verlangt für den Zugriff eine eigene, kostenlose „App“ in deinem Konto. Das dauert etwa zwei Minuten und ist nur einmal nötig.</p>
+      <ol className="list-decimal space-y-2 pl-5 text-muted">
+        <li><a className="text-accent hover:underline" href="https://developer.spotify.com/dashboard" target="_blank" rel="noreferrer">developer.spotify.com/dashboard</a> öffnen, anmelden und „Create app“ wählen (Spotify Premium nötig). Name und Beschreibung sind frei wählbar.</li>
+        <li>Bei „Redirect URIs“ genau diese Adresse eintragen: <code className="rounded bg-hover px-1.5 py-0.5 font-mono text-xs text-text select-all">{redirectUri}</code></li>
+        <li>Bei „Which API/SDKs are you planning to use?“ „Web API“ ankreuzen und speichern.</li>
+        <li>In den App-Einstellungen Client ID und Client Secret kopieren und hier einfügen.</li>
+      </ol>
+      <label className="block">
+        <span className="mb-1.5 block font-medium">Client ID</span>
+        <input value={id} onChange={(e) => setId(e.target.value)} className={cx(inputClass, "w-full font-mono text-[13px]")} spellCheck={false} autoComplete="off" required />
+      </label>
+      <label className="block">
+        <span className="mb-1.5 block font-medium">Client Secret</span>
+        <input value={secret} onChange={(e) => setSecret(e.target.value)} type="password" className={cx(inputClass, "w-full font-mono text-[13px]")} autoComplete="off" required />
+      </label>
+      <div className="flex items-center justify-between gap-4">
+        <span className="text-xs text-faint">Die Daten bleiben auf diesem Rechner (Ordner .settracker in deinem Benutzerordner).</span>
+        <Button type="submit" variant="primary" loading={saving}>Speichern</Button>
+      </div>
+    </form>
   );
 }
 

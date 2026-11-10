@@ -27,6 +27,28 @@ def configured() -> bool:
     return bool(os.environ.get("SPOTIPY_CLIENT_ID") and os.environ.get("SPOTIPY_CLIENT_SECRET"))
 
 
+def save_credentials(client_id: str, client_secret: str) -> None:
+    """Prüft Client ID/Secret gegen Spotify und legt sie in der .env im Datenordner ab."""
+    global _app_auth
+    r = httpx.post("https://accounts.spotify.com/api/token", data={"grant_type": "client_credentials"},
+                   auth=(client_id, client_secret), timeout=20)
+    if r.status_code != 200:
+        raise SpotifyError(400, "Spotify lehnt diese Zugangsdaten ab – bitte Client ID und Client Secret prüfen")
+    config.data_dir()
+    keep = []
+    if config.ENV_FILE.is_file():
+        keep = [line for line in config.ENV_FILE.read_text().splitlines()
+                if not line.startswith(("SPOTIPY_CLIENT_ID=", "SPOTIPY_CLIENT_SECRET="))]
+    config.ENV_FILE.write_text("\n".join([*keep, f"SPOTIPY_CLIENT_ID={client_id}", f"SPOTIPY_CLIENT_SECRET={client_secret}"]) + "\n")
+    try:
+        config.ENV_FILE.chmod(0o600)
+    except OSError:
+        pass
+    os.environ["SPOTIPY_CLIENT_ID"], os.environ["SPOTIPY_CLIENT_SECRET"] = client_id, client_secret
+    _app_auth = None
+    logout()
+
+
 def oauth():
     from spotipy.cache_handler import CacheFileHandler
     from spotipy.oauth2 import SpotifyOAuth

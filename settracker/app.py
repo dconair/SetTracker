@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import config, db, library
-from .engine import compat, review as review_engine, sequence, suggest as suggest_engine, transitions
+from .engine import compat, cues as cue_engine, review as review_engine, sequence, suggest as suggest_engine, transitions
 from .export import cheatsheet, m3u, rekordbox_xml
 from .music import FAMILIES, genre_family, key_name, mood_label
 from .spotify import client as spotify, importer, reccobeats
@@ -109,7 +109,7 @@ def tracks() -> list[dict]:
 @app.get("/api/tracks/{track_id}")
 def track(track_id: int) -> dict:
     t = need_track(track_id)
-    return {**present(t), "analysis": t["analysis"]}
+    return {**present(t), "analysis": t["analysis"], "cues": cue_engine.track_cues(t), "phases": cue_engine.phases(t)}
 
 
 @app.get("/api/tracks/{track_id}/waveform")
@@ -228,13 +228,87 @@ def spotify_login() -> dict:
     return {"url": spotify.login_url()}
 
 
+class Credentials(BaseModel):
+    client_id: str
+    client_secret: str
+
+
+@app.post("/api/spotify/credentials")
+def spotify_credentials(body: Credentials) -> dict:
+    cid, secret = body.client_id.strip(), body.client_secret.strip()
+    if not re.fullmatch(r"[0-9a-zA-Z]{20,64}", cid) or not re.fullmatch(r"[0-9a-zA-Z]{20,64}", secret):
+        raise HTTPException(400, "Client ID und Client Secret bestehen aus je 32 Buchstaben und Ziffern")
+    try:
+        spotify.save_credentials(cid, secret)
+    except spotify.SpotifyError as exc:
+        raise HTTPException(400, str(exc))
+    db.kv_set("spotify_user", None)
+    return {"ok": True}
+
+
+def _login_page(title: str, text: str) -> HTMLResponse:
+    return HTMLResponse(
+        "<!doctype html><meta charset='utf-8'><title>SetTracker – Spotify</title>"
+        "<body style='font:15px/1.5 system-ui,sans-serif;background:#0a0c10;color:#e9ecf2;max-width:560px;margin:12vh auto;padding:0 24px'>"
+        f"<h1 style='font-size:20px'>{title}</h1><p style='color:#8d95a8'>{text}</p>"
+        "<p><a href='/#/bibliothek' style='color:#6c8cff'>Zurück zu SetTracker</a></p></body>", status_code=400)
+
+
 @app.get("/callback")
 def spotify_callback(code: str | None = None, error: str | None = None):
     if error or not code:
-        return HTMLResponse(f"<p>Spotify-Anmeldung abgebrochen: {error or 'kein Code'}</p><a href='/'>Zurück</a>", status_code=400)
-    spotify.finish_login(code)
+        reason = "Du hast die Freigabe abgelehnt." if error == "access_denied" else f"Spotify meldet: {error or 'kein Code erhalten'}."
+        return _login_page("Spotify-Anmeldung nicht abgeschlossen", reason)
+    try:
+        spotify.finish_login(code)
+    except Exception as exc:
+        return _login_page(
+            "Spotify-Anmeldung fehlgeschlagen",
+            f"Der Anmeldecode konnte nicht eingelöst werden ({str(exc)[:200]}). Häufigste Ursache: Client Secret falsch oder die "
+            f"Redirect URI in der Spotify-App weicht von <code>{config.REDIRECT_URI}</code> ab.")
     db.kv_set("spotify_user", None)
     return RedirectResponse("/#/bibliothek")
+
+
+@app.get("/api/spotify/check")
+def spotify_check() -> dict:
+    """Verbindungsprüfung Schritt für Schritt – zeigt, an welcher Stelle Spotify nicht mitspielt."""
+    steps: list[dict] = []
+
+    def step(name: str, fn, hint: str) -> bool:
+        try:
+            detail = fn()
+            steps.append({"name": name, "ok": True, "detail": detail or ""})
+            return True
+        except Exception as exc:
+            status = getattr(exc, "status", None)
+            extra = hint
+            if status == 403:
+                extra = ("Spotify verweigert den Zugriff (403). Im Developer Dashboard unter „User Management“ muss dein "
+                         "Spotify-Konto eingetragen sein, und der Besitzer der App braucht Spotify Premium.")
+            elif status == 401:
+                extra = "Die Anmeldung ist abgelaufen oder ungültig – bitte abmelden und neu anmelden."
+            steps.append({"name": name, "ok": False, "detail": str(exc)[:200], "hint": extra})
+            return False
+
+    if not spotify.configured():
+        steps.append({"name": "Zugangsdaten hinterlegt", "ok": False, "detail": "", "hint": "Client ID und Client Secret fehlen auf diesem Rechner – bitte im Dialog eintragen."})
+        return {"ok": False, "steps": steps, "redirect_uri": config.REDIRECT_URI}
+    steps.append({"name": "Zugangsdaten hinterlegt", "ok": True, "detail": ""})
+    ok = step("Client ID und Secret gültig", lambda: spotify.app_token() and "",
+              "Spotify lehnt Client ID/Secret ab – bitte im Developer Dashboard neu kopieren.")
+    ok = ok and step("Suche erreichbar", lambda: f"{len(spotify.request('GET', '/search', user=False, params={'q': 'house', 'type': 'track', 'limit': 1})['tracks']['items'])} Treffer",
+                     "Die Web API antwortet nicht – in der Spotify-App muss „Web API“ aktiviert sein.")
+    if ok:
+        if not spotify.user_token():
+            steps.append({"name": "Mit Konto angemeldet", "ok": False, "detail": "",
+                          "hint": f"Noch nicht angemeldet. Klappt die Anmeldung nicht, muss in der Spotify-App exakt diese Redirect URI stehen: {config.REDIRECT_URI}"})
+            ok = False
+        else:
+            ok = step("Mit Konto angemeldet", lambda: spotify.me().get("display_name") or "ok", "Die Anmeldung ist ungültig – bitte neu anmelden.")
+            ok = ok and step("Playlists lesbar", lambda: f"{len(spotify.playlists())} Playlists", "Playlists lassen sich nicht lesen.")
+            ok = ok and step("Lieblingssongs lesbar", lambda: f"{spotify.request('GET', '/me/tracks', params={'limit': 1}).get('total', '?')} Titel", "Lieblingssongs lassen sich nicht lesen.")
+    return {"ok": ok, "steps": steps, "redirect_uri": config.REDIRECT_URI}
 
 
 @app.post("/api/spotify/logout")
@@ -473,6 +547,12 @@ def _export_data(set_id: int) -> tuple[dict, list[dict], list[dict]]:
     return s, tracks, plans
 
 
+def _set_cues(tracks: list[dict], plans: list[dict]) -> dict[int, list[dict]]:
+    """Cue-Plan je Track im Set: Phasen-Cues und Loops, überlagert von den Mix-Punkten der Übergänge."""
+    return {t["id"]: cue_engine.set_cues(t, plans[i - 1] if i > 0 else None, plans[i] if i < len(plans) else None)
+            for i, t in enumerate(tracks)}
+
+
 def _filename(name: str, ext: str) -> str:
     return re.sub(r"[^\w\- ]+", "", name).strip().replace(" ", "_") or "set"
 
@@ -485,11 +565,9 @@ def _download(content: str, media: str, name: str, ext: str) -> Response:
 @app.get("/api/sets/{set_id}/export/rekordbox.xml")
 def export_rekordbox(set_id: int) -> Response:
     s, tracks, plans = _export_data(set_id)
-    cues: dict[int, list[dict]] = {}
-    for i, p in enumerate(plans):
-        cues.setdefault(tracks[i]["id"], []).extend(p["cues_a"])
-        cues.setdefault(tracks[i + 1]["id"], []).extend(p["cues_b"])
-    return _download(rekordbox_xml.build(s["name"], tracks, cues), "application/xml", s["name"], ".xml")
+    cues = _set_cues(tracks, plans)
+    phases = {t["id"]: cue_engine.phases(t) for t in tracks}
+    return _download(rekordbox_xml.build(s["name"], tracks, cues, phases), "application/xml", s["name"], ".xml")
 
 
 @app.get("/api/sets/{set_id}/export/playlist.m3u")
@@ -502,7 +580,7 @@ def export_m3u(set_id: int) -> Response:
 def export_cheatsheet(set_id: int) -> str:
     s, tracks, plans = _export_data(set_id)
     scores = review_engine.rate(tracks, weights())["transitions"]
-    return cheatsheet.build(s["name"], tracks, plans, scores)
+    return cheatsheet.build(s["name"], tracks, plans, scores, _set_cues(tracks, plans))
 
 
 @app.post("/api/sets/{set_id}/export/spotify")
@@ -527,6 +605,22 @@ def export_spotify(set_id: int) -> dict:
         raise HTTPException(400, "Keiner der Tracks wurde bei Spotify gefunden")
     result = spotify_call(spotify.create_playlist, s["name"], ids, "Erstellt mit SetTracker")
     return {**result, "added": len(ids), "missing": missing}
+
+
+class Quit(BaseModel):
+    confirm: bool
+
+
+@app.post("/api/quit")
+def quit_app(body: Quit) -> dict:
+    """Beendet SetTracker (die installierte App hat kein Fenster zum Schließen)."""
+    if not body.confirm:
+        raise HTTPException(400, "Nicht bestätigt")
+    import os
+    import threading
+
+    threading.Timer(0.4, lambda: os._exit(0)).start()
+    return {"ok": True}
 
 
 # ------------------------------------------------------------------ Oberfläche

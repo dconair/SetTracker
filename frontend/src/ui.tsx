@@ -128,10 +128,11 @@ export function SourceTag({ track }: { track: Track }) {
   return <span className="rounded px-1.5 py-0.5 text-[11px] font-medium" style={{ color: "#1ed760", background: "rgb(30 215 96 / 0.12)" }} title="Nur bei Spotify – ohne Waveform">Spotify</span>;
 }
 
-export function TrackTitle({ track, compact }: { track: Track; compact?: boolean }) {
+export function TrackTitle({ track, compact, onOpen }: { track: Track; compact?: boolean; onOpen?: () => void }) {
+  const title = <div className={cx("truncate font-medium", compact && "text-[13px]")}>{track.title}</div>;
   return (
     <div className="min-w-0">
-      <div className={cx("truncate font-medium", compact && "text-[13px]")}>{track.title}</div>
+      {onOpen ? <button onClick={onOpen} className="block max-w-full text-left hover:text-accent" title="Details, Hot Cues und Phasen anzeigen">{title}</button> : title}
       <div className={cx("truncate text-muted", compact ? "text-xs" : "text-[13px]")}>{track.artist || "Unbekannter Künstler"}</div>
     </div>
   );

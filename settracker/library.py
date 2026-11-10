@@ -121,6 +121,18 @@ def _run() -> None:
         _state["current"] = ""
 
 
+def resume_pending() -> int:
+    """Reiht beim Start alle lokalen Tracks ein, deren Analyse noch aussteht oder unterbrochen wurde."""
+    ids = []
+    for t in db.all_tracks():
+        if t["source"] == "local" and t["status"] in ("pending", "analyzing"):
+            if t["status"] == "analyzing":
+                db.update_track(t["id"], status="pending")
+            ids.append(t["id"])
+    enqueue(ids)
+    return len(ids)
+
+
 def status() -> dict:
     return {**_state, "running": _state["done"] < _state["total"]}
 

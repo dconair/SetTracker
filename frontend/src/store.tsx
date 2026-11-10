@@ -15,6 +15,9 @@ interface Store {
   togglePlay: (track: Track) => void;
   route: string[];
   go: (path: string) => void;
+  /** Öffnet die Track-Details (Waveform, Hot Cues, Phasen). */
+  openTrack: (id: number | null) => void;
+  detailId: number | null;
 }
 
 const Ctx = createContext<Store>(null as unknown as Store);
@@ -29,6 +32,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [dataVersion, setDataVersion] = useState(0);
   const [playing, setPlaying] = useState<number | null>(null);
   const [route, setRoute] = useState(parseRoute);
+  const [detailId, openTrack] = useState<number | null>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
   const busy = useRef(false);
 
@@ -85,7 +89,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <Ctx.Provider value={{ status, tracks, sets, refreshTracks, refreshSets, refreshStatus, dataVersion, playing, togglePlay, route, go }}>
+    <Ctx.Provider value={{ status, tracks, sets, refreshTracks, refreshSets, refreshStatus, dataVersion, playing, togglePlay, route, go, openTrack, detailId }}>
       {children}
     </Ctx.Provider>
   );

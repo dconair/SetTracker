@@ -217,6 +217,7 @@ export function SetBuilder({ id }: { id: number }) {
 
 function SetRow({ track, index, pinned, onPin, onRemove }: { track: Track; index: number; pinned: boolean; onPin: () => void; onRemove: () => void }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: track.id });
+  const { openTrack } = useStore();
   return (
     <div
       ref={setNodeRef}
@@ -228,7 +229,7 @@ function SetRow({ track, index, pinned, onPin, onRemove }: { track: Track; index
       </button>
       <span className="num w-5 text-center text-[13px] font-semibold text-muted">{index + 1}</span>
       <div className="flex min-w-0 flex-1 items-center gap-2.5">
-        <TrackTitle track={track} />
+        <TrackTitle track={track} onOpen={() => openTrack(track.id)} />
         <SourceTag track={track} />
       </div>
       <span className="hidden w-28 truncate text-[13px] text-muted md:block">{track.family || "–"}</span>

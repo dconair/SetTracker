@@ -93,3 +93,37 @@ def test_transition_without_audio_is_generic(lib):
     plan = transitions.plan(lib["Rooftop Groove"], spotify_only)
     assert not plan["precise"] and "mix_out" not in plan and plan["cues_a"] == []
     assert plan["steps"][-1]["when"] == "Hinweis"
+
+
+def test_track_cues_label_phases_and_loops(lib):
+    from settracker.engine import cues
+
+    track = lib["Warehouse Jack"]  # Aufbau: 16 Intro, 16 Haupt, 4 Break, 16 Haupt, 16 Outro
+    plan = {c["pad"]: c for c in cues.track_cues(track)}
+    assert [plan[p]["name"] for p in sorted(plan)] == ["INTRO", "DROP", "BREAK", "DROP 2", "LOOP INTRO", "LOOP OUTRO", "OUTRO"]
+    assert plan[2]["bar"] == 17 and plan[3]["bar"] == 33 and plan[4]["bar"] == 37 and plan[8]["bar"] == 53
+    bar_len = track["analysis"]["bar_len"]
+    for pad in (5, 6):
+        assert plan[pad]["kind"] == "loop" and abs(plan[pad]["end"] - plan[pad]["time"] - 4 * bar_len) < 0.01
+    assert plan[6]["time"] == plan[8]["time"] and plan[1]["letter"] == "A" and plan[8]["letter"] == "H"
+    assert [p["name"] for p in cues.phases(track)] == ["INTRO", "DROP", "BREAK", "DROP 2", "OUTRO"]
+
+
+def test_cues_without_audio_are_marked_estimated():
+    from settracker.engine import cues
+
+    plan = cues.track_cues({"bpm": 120.0, "duration": 300, "analysis": None})
+    assert plan and all(c["estimated"] for c in plan)
+    assert plan[0]["name"] == "START" and plan[-1]["name"] == "MIX OUT?" and plan[-1]["pad"] == 8
+    assert cues.track_cues({"bpm": None, "duration": 300, "analysis": None}) == []
+
+
+def test_set_cues_take_mix_points_from_transitions(lib):
+    from settracker.engine import cues
+
+    a, b = lib["Warehouse Jack"], lib["Steel Tunnel"]
+    plan = transitions.plan(a, b, template="bass_swap")
+    out = {c["pad"]: c["name"] for c in cues.set_cues(a, None, plan)}
+    assert out[8] == "MIX OUT" and out[7] == "BASS SWAP" and out[6] == "LOOP OUTRO" and out[1] == "INTRO"
+    into = {c["pad"]: c["name"] for c in cues.set_cues(b, plan, None)}
+    assert into[1] == "MIX IN" and into[2] == "DROP" and into[5] == "LOOP INTRO"

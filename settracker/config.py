@@ -6,9 +6,13 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
 DATA_DIR = Path(os.environ.get("SETTRACKER_DATA", Path.home() / ".settracker"))
+ENV_FILE = DATA_DIR / ".env"
+
+# Zugangsdaten: zuerst die .env im Arbeitsordner (Entwicklung), dann die im Datenordner
+# (dort speichert die Oberfläche sie; die installierte App hat keinen Arbeitsordner).
+load_dotenv()
+load_dotenv(ENV_FILE)
 STATIC_DIR = Path(__file__).parent / "static"
 HOST = os.environ.get("SETTRACKER_HOST", "127.0.0.1")
 PORT = int(os.environ.get("SETTRACKER_PORT", "8000"))

@@ -14,11 +14,12 @@ h1{font-size:26px;margin:0 0 4px}.meta{color:#5b6472;margin-bottom:24px}
 .trans{margin:6px 0 6px 38px;padding:10px 14px;border-left:3px solid #7c5cff;break-inside:avoid}
 .trans h3{margin:0 0 2px;font-size:14px}.why{color:#5b6472;margin:0 0 6px}.trans ol{margin:0;padding-left:20px}.trans li{margin:2px 0}
 .when{font-weight:650}.score{float:right}.good{color:#10804a}.ok{color:#a26400}.bad{color:#c22b2b}
+.pads{margin:4px 0 0 38px;font-size:12px;color:#5b6472;display:flex;flex-wrap:wrap;gap:4px 10px;break-inside:avoid}.pad b{display:inline-block;min-width:16px;text-align:center;background:#14161a;color:#fff;border-radius:4px;margin-right:3px}.pad i{font-style:normal;font-family:ui-monospace,Menlo,monospace}
 @media print{body{padding:0}.track{background:#fff}}
 """
 
 
-def build(name: str, tracks: list[dict], transitions: list[dict], scores: list[dict]) -> str:
+def build(name: str, tracks: list[dict], transitions: list[dict], scores: list[dict], cues: dict[int, list[dict]] | None = None) -> str:
     total = sum(t["duration"] or 0 for t in tracks)
     parts = [f"<!doctype html><html lang='de'><meta charset='utf-8'><title>{escape(name)} – Spickzettel</title><style>{CSS}</style>",
              f"<h1>{escape(name)}</h1><div class='meta'>{len(tracks)} Tracks · ca. {int(total // 60)} min · DDJ-FLX4 / rekordbox</div>"]
@@ -35,6 +36,13 @@ def build(name: str, tracks: list[dict], transitions: list[dict], scores: list[d
             f"<span class='artist'>– {escape(t['artist'] or '')}</span></span>"
             + "".join(f"<span class='tag'>{escape(x)}</span>" for x in tags) + "</div>"
         )
+        pads = (cues or {}).get(t["id"], [])
+        if pads:
+            note = " (geschätztes Raster – ohne Audiodatei, bitte nach Gehör setzen)" if pads[0].get("estimated") else ""
+            items = "".join(
+                f"<span class='pad'><b>{c['pad']}</b> {escape(c['name'])} <i>{c['label']}{' ↻ ' + str(c['bars']) + ' Takte' if c['kind'] == 'loop' else ''}</i></span>"
+                for c in pads)
+            parts.append(f"<div class='pads'>Hot Cues{note}: {items}</div>")
         if i < len(transitions):
             tr, sc = transitions[i], scores[i]
             head = f"Deck {tr['deck_a']} → Deck {tr['deck_b']}: {escape(tr['title'])}"

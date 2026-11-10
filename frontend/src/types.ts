@@ -59,7 +59,7 @@ export interface SetInfo { id: number; name: string; count: number; origin: stri
 export interface Suggestion { track: Track; score: number; verdict: Verdict; reasons: string[] }
 
 export interface Cue { pad: number; name: string; time: number; label: string }
-export interface Step { when: string; deck: number | null; text: string }
+export interface Step { when: string; deck: number | null; text: string; controls: string[] }
 export interface Plan {
   template: string;
   title: string;
@@ -128,3 +128,8 @@ export interface Status {
   weights: Record<string, number>;
 }
 export interface SpotifyPlaylist { id: string; name: string; count: number | null; image: string | null; owner: string | null }
+
+export interface TrackCue { pad: number; letter: string; name: string; kind: "cue" | "loop"; time: number; end?: number; bars?: number; label: string; bar: number; estimated: boolean }
+export interface Phase { name: string; kind: string; time: number; end: number; label: string; bar: number; bars: number }
+export interface TrackDetail extends Track { cues: TrackCue[]; phases: Phase[] }
+export interface SpotifyCheck { ok: boolean; redirect_uri: string; steps: { name: string; ok: boolean; detail: string; hint?: string }[] }

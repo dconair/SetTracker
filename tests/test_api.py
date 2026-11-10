@@ -74,14 +74,18 @@ def test_exports_roundtrip(api, lib, demo_set, tmp_path):
     assert root.tag == "DJ_PLAYLISTS" and len(root.findall("./COLLECTION/TRACK")) == 5
     track = root.find("./COLLECTION/TRACK")
     assert track.get("Location").startswith("file://localhost/") and track.find("TEMPO") is not None
-    assert {m.get("Name") for m in root.iter("POSITION_MARK")} >= {"MIX IN", "MIX OUT"}
+    marks = list(root.iter("POSITION_MARK"))
+    assert {m.get("Name") for m in marks} >= {"MIX IN", "MIX OUT", "LOOP INTRO", "LOOP OUTRO", "BREAK", "INTRO", "OUTRO"}
+    loops = [m for m in marks if m.get("Type") == "4"]
+    assert loops and all(float(m.get("End")) > float(m.get("Start")) and m.get("Num") in ("4", "5") for m in loops)
+    assert any(m.get("Num") == "-1" and m.get("Name") == "BREAK" for m in marks)  # Phasen als Memory Cues
     parsed = rekordbox_xml.parse(xml.text)
     assert parsed[0]["name"] == "Test Set" and parsed[0]["paths"][0] == lib["Liquid Sky"]["path"]
 
     text = api.get(f"/api/sets/{sid}/export/playlist.m3u").text
     assert m3u.parse(text) == [i["track"]["path"] for i in demo_set["items"]]
     sheet = api.get(f"/api/sets/{sid}/export/cheatsheet.html").text
-    assert "Liquid Sky" in sheet and "Deck 1 → Deck 2" in sheet
+    assert "Liquid Sky" in sheet and "Deck 1 → Deck 2" in sheet and "LOOP OUTRO" in sheet
 
     up = api.post("/api/import/file", files={"file": ("Abend.m3u", text.encode())}).json()
     imported = api.get(f"/api/sets/{up['set_ids'][0]}").json()
@@ -113,3 +117,44 @@ def test_reccobeats_field_mapping():
     fields = reccobeats.to_fields({"tempo": 122.746, "key": 2, "mode": 1, "energy": 0.697, "valence": 0.476, "loudness": -8.6})
     assert fields["bpm"] == 122.7 and fields["camelot"] == "10B" and fields["energy"] == 0.697
     assert "camelot" not in reccobeats.to_fields({"tempo": 100, "key": -1, "mode": 1})
+
+
+def test_spotify_credentials_are_validated_and_stored(api, monkeypatch, tmp_path):
+    from settracker import config
+    from settracker.spotify import client
+
+    monkeypatch.setattr(config, "ENV_FILE", tmp_path / ".env")
+    monkeypatch.setattr(config, "data_dir", lambda: tmp_path)
+    monkeypatch.setenv("SPOTIPY_CLIENT_ID", "")
+    monkeypatch.setenv("SPOTIPY_CLIENT_SECRET", "")
+    assert api.post("/api/spotify/credentials", json={"client_id": "kurz", "client_secret": "x"}).status_code == 400
+
+    class Reply:
+        status_code = 401
+
+    monkeypatch.setattr(client.httpx, "post", lambda *a, **k: Reply())
+    bad = api.post("/api/spotify/credentials", json={"client_id": "a" * 32, "client_secret": "b" * 32})
+    assert bad.status_code == 400 and not (tmp_path / ".env").exists()
+
+    Reply.status_code = 200
+    (tmp_path / ".env").write_text("ANDERES=1\nSPOTIPY_CLIENT_ID=alt\n")
+    ok = api.post("/api/spotify/credentials", json={"client_id": "a" * 32, "client_secret": "b" * 32})
+    assert ok.status_code == 200 and "b" * 32 not in ok.text
+    assert (tmp_path / ".env").read_text().splitlines() == ["ANDERES=1", "SPOTIPY_CLIENT_ID=" + "a" * 32, "SPOTIPY_CLIENT_SECRET=" + "b" * 32]
+    assert client.configured()
+
+
+def test_quit_requires_confirmation(api):
+    assert api.post("/api/quit", json={"confirm": False}).status_code == 400
+    assert api.post("/api/quit", data="confirm=true").status_code == 422
+
+
+def test_track_detail_has_cues_and_spotify_check_reports_steps(api, lib, monkeypatch):
+    detail = api.get(f"/api/tracks/{lib['Liquid Sky']['id']}").json()
+    assert detail["cues"][0]["name"] == "INTRO" and detail["phases"][-1]["name"] == "OUTRO"
+
+    monkeypatch.setenv("SPOTIPY_CLIENT_ID", "")
+    check = api.get("/api/spotify/check").json()
+    assert not check["ok"] and check["steps"][0]["ok"] is False and "Client ID" in check["steps"][0]["hint"]
+    bad = api.get("/callback", params={"error": "access_denied"})
+    assert bad.status_code == 400 and "abgelehnt" in bad.text
