@@ -6,15 +6,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { useStore } from "../store";
 import type { SetView, Suggestion, Track, Transition } from "../types";
-import { Button, Card, cx, Empty, fmtBpm, fmtLong, IconButton, KeyBadge, Menu, MenuItem, Meter, Modal, PageHeader, ScoreBadge, Select, changesText, SourceTag, TrackTitle, useAction, useToast, verdictColor } from "../ui";
+import { Button, Card, cx, Empty, fmtBpm, fmtLong, IconButton, KeyBadge, Menu, MenuItem, Meter, Modal, PageHeader, ScoreBadge, Select, changesText, SourceTag, TrackTitle, useAction, useDialog, useToast, verdictColor } from "../ui";
 import { FolderDialog, SpotifyLogo } from "./Library";
 import { TransitionPanel } from "./TransitionPanel";
 
 export function SetList() {
   const { sets, refreshSets, go } = useStore();
   const run = useAction();
+  const dialog = useDialog();
   const create = async () => {
-    const name = window.prompt("Name des neuen Sets", "Neues Set");
+    const name = await dialog.ask("Neues Set", "Neues Set");
     if (!name) return;
     const created = await run(() => api.createSet(name));
     if (created) { await refreshSets(); go(`sets/${created.id}`); }
@@ -69,6 +70,7 @@ export function SetBuilder({ id }: { id: number }) {
   const [openTransition, setOpenTransition] = useState<number | null>(null);
   const [sorting, setSorting] = useState(false);
   const [exported, setExported] = useState<{ url: string; added: number; missing: string[] } | null>(null);
+  const dialog = useDialog();
   const [onlyMissing, setOnlyMissing] = useState(false);
   const [folder, setFolder] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -139,14 +141,17 @@ export function SetBuilder({ id }: { id: number }) {
         {view.spotify_playlist_id && <Button icon={<RefreshCw size={16} />} loading={refreshing} onClick={refresh} title="Playlist erneut aus Spotify laden – Inhalt und Reihenfolge werden übernommen">Aus Spotify aktualisieren</Button>}
         <Button icon={<Wand2 size={16} />} loading={sorting} disabled={total < 3} onClick={autosort} title="Reihenfolge für bessere Übergänge optimieren (angepinnte Tracks bleiben)">Auto-Sortieren</Button>
         <Button icon={<ScanSearch size={16} />} disabled={total < 2} onClick={() => go(`check/${id}`)}>Playlist-Check</Button>
-        <Menu trigger={() => <Button variant="primary" icon={<Download size={16} />} disabled={total === 0}>Export <ChevronDown size={14} /></Button>}>
+        <Menu trigger={() => <Button variant="primary" icon={<Download size={16} />}>Export <ChevronDown size={14} /></Button>}>
           {(close) => <>
+            {total === 0 && <div className="px-2.5 py-2 text-[13px] text-faint">Noch nichts zu exportieren – das Set ist leer.</div>}
+            {total > 0 && <>
             <MenuItem icon={<SpotifyLogo size={15} />} onClick={async () => { close(); const r = await run(() => api.exportSpotify(id)); if (r) setExported(r); }}>Als Spotify-Playlist anlegen</MenuItem>
             <MenuItem icon={<FileCode2 size={15} />} onClick={() => { close(); window.location.href = `/api/sets/${id}/export/rekordbox.xml`; }}>rekordbox-XML mit Hot Cues</MenuItem>
             <MenuItem icon={<FileText size={15} />} onClick={() => { close(); window.location.href = `/api/sets/${id}/export/playlist.m3u`; }}>M3U-Playlist</MenuItem>
             <MenuItem icon={<Printer size={15} />} onClick={() => { close(); window.open(`/api/sets/${id}/export/cheatsheet.html`, "_blank"); }}>Spickzettel mit FLX4-Schritten</MenuItem>
+            </>}
             <div className="my-1 border-t border-line" />
-            <MenuItem danger icon={<Trash2 size={15} />} onClick={async () => { close(); if (window.confirm(`Set „${view.name}“ löschen?`)) { await run(() => api.deleteSet(id)); await refreshSets(); go("sets"); } }}>Set löschen</MenuItem>
+            <MenuItem danger icon={<Trash2 size={15} />} onClick={async () => { close(); if (await dialog.confirm(`Set „${view.name}“ löschen?`, "Die Tracks bleiben in der Bibliothek.", { action: "Löschen", danger: true })) { await run(() => api.deleteSet(id)); await refreshSets(); go("sets"); } }}>Set löschen</MenuItem>
           </>}
         </Menu>
       </PageHeader>

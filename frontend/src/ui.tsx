@@ -285,3 +285,58 @@ export const changesText = (c: Changes) => {
 /** Farbe je Stimmung – für das Stimmungs-Band im Playlist-Check. */
 export const moodColor = (mood: string) =>
   ({ Euphorisch: "#ffb84d", "Treibend & dunkel": "#f2617a", Groovig: "#3ecf8e", "Deep & hypnotisch": "#6c8cff", Entspannt: "#5fd4d4", Melancholisch: "#a78bfa" } as Record<string, string>)[mood] ?? "var(--line)";
+
+// ---------------------------------------------------------------- Dialoge (statt window.prompt/confirm)
+interface DialogRequest {
+  kind: "prompt" | "confirm";
+  title: string;
+  text?: string;
+  value?: string;
+  action?: string;
+  danger?: boolean;
+  resolve: (result: string | boolean | null) => void;
+}
+interface DialogApi {
+  /** Texteingabe; liefert null bei Abbruch. */
+  ask: (title: string, initial?: string, action?: string) => Promise<string | null>;
+  /** Rückfrage; liefert true bei Bestätigung. */
+  confirm: (title: string, text?: string, options?: { action?: string; danger?: boolean }) => Promise<boolean>;
+}
+const DialogContext = createContext<DialogApi>(null as unknown as DialogApi);
+export const useDialog = () => useContext(DialogContext);
+
+export function DialogProvider({ children }: { children: ReactNode }) {
+  const [request, setRequest] = useState<DialogRequest | null>(null);
+  const [value, setValue] = useState("");
+  const api = useRef<DialogApi>({
+    ask: (title, initial = "", action = "Anlegen") =>
+      new Promise((resolve) => { setValue(initial); setRequest({ kind: "prompt", title, action, resolve: (r) => resolve(r as string | null) }); }),
+    confirm: (title, text, options = {}) =>
+      new Promise((resolve) => setRequest({ kind: "confirm", title, text, action: options.action ?? "OK", danger: options.danger, resolve: (r) => resolve(r === true) })),
+  });
+  const close = (result: string | boolean | null) => { request?.resolve(result); setRequest(null); };
+  const submit = () => {
+    if (!request) return;
+    if (request.kind === "confirm") close(true);
+    else if (value.trim()) close(value.trim());
+  };
+  return (
+    <DialogContext.Provider value={api.current}>
+      {children}
+      {request && (
+        <Modal title={request.title} onClose={() => close(request.kind === "confirm" ? false : null)} footer={<>
+          <Button variant="ghost" onClick={() => close(request.kind === "confirm" ? false : null)}>Abbrechen</Button>
+          <Button variant={request.danger ? "danger" : "primary"} onClick={submit} disabled={request.kind === "prompt" && !value.trim()} autoFocus={request.kind === "confirm"}>{request.action}</Button>
+        </>}>
+          {request.kind === "prompt" ? (
+            <form onSubmit={(e) => { e.preventDefault(); submit(); }}>
+              <input autoFocus value={value} onChange={(e) => setValue(e.target.value)} onFocus={(e) => e.target.select()} className={cx(inputClass, "w-full")} aria-label={request.title} />
+            </form>
+          ) : (
+            <p className="text-muted">{request.text}</p>
+          )}
+        </Modal>
+      )}
+    </DialogContext.Provider>
+  );
+}

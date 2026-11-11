@@ -3,7 +3,7 @@ import { useState, type ReactNode } from "react";
 import { api } from "./api";
 import { StoreProvider, useStore } from "./store";
 import { ACCENTS, THEMES, useAppearance, WAVES, type Appearance } from "./theme";
-import { cx, Modal, ToastProvider } from "./ui";
+import { cx, DialogProvider, Modal, ToastProvider, useDialog } from "./ui";
 import { Check } from "./views/Check";
 import { Library } from "./views/Library";
 import { TrackPanel } from "./views/TrackPanel";
@@ -19,9 +19,10 @@ function Shell() {
   const { route, go, status, detailId, openTrack } = useStore();
   const { appearance, update } = useAppearance();
   const [showAppearance, setShowAppearance] = useState(false);
+  const dialog = useDialog();
   const [stopped, setStopped] = useState(false);
   const quit = async () => {
-    if (!window.confirm("SetTracker beenden? Laufende Analysen werden abgebrochen und beim nächsten Start fortgesetzt.")) return;
+    if (!(await dialog.confirm("SetTracker beenden?", "Laufende Analysen werden abgebrochen und beim nächsten Start fortgesetzt.", { action: "Beenden" }))) return;
     await api.quit().catch(() => {});
     setStopped(true);
   };
@@ -85,6 +86,7 @@ function Shell() {
             <Palette size={18} />
             <span className="hidden lg:block">Darstellung</span>
           </button>
+{!status?.desktop && (
           <button
             onClick={quit}
             className="flex h-10 items-center justify-center gap-3 rounded-lg px-3 text-sm text-muted transition-colors hover:bg-hover hover:text-text lg:justify-start"
@@ -93,6 +95,7 @@ function Shell() {
             <Power size={18} />
             <span className="hidden lg:block">Beenden</span>
           </button>
+          )}
         </div>
       </nav>
       <main className="min-w-0 flex-1 overflow-y-auto">
@@ -193,9 +196,11 @@ export function Progress({ done, total }: { done: number; total: number }) {
 export default function App() {
   return (
     <ToastProvider>
-      <StoreProvider>
-        <Shell />
-      </StoreProvider>
+      <DialogProvider>
+        <StoreProvider>
+          <Shell />
+        </StoreProvider>
+      </DialogProvider>
     </ToastProvider>
   );
 }

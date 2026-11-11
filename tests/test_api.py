@@ -245,3 +245,47 @@ def test_spotify_playlist_refresh_keeps_set_and_pins(api, lib, monkeypatch):
         if (t["spotify_id"] or "").startswith("pl_"):
             db.delete_track(t["id"])
     api.delete(f"/api/sets/{view['id']}")
+
+
+def test_desktop_falls_back_to_browser_when_window_fails(monkeypatch):
+    import sys
+    import types
+
+    from settracker import config, desktop
+
+    monkeypatch.setattr(config, "DESKTOP", False)  # wird nach dem Test auf False zurückgesetzt
+
+    # Bibliothek fehlt
+    monkeypatch.setitem(sys.modules, "webview", None)
+    assert desktop.open_window("http://127.0.0.1:1") is False and config.DESKTOP is False
+
+    # Bibliothek da, aber der Fensterstart scheitert (z. B. kein WebView2)
+    calls = {}
+
+    def start(*args, **kwargs):
+        calls["start"] = kwargs
+        raise RuntimeError("kein Fenstersystem")
+
+    fake = types.SimpleNamespace(settings={}, create_window=lambda *a, **k: calls.setdefault("window", (a, k)) and object(), start=start)
+    monkeypatch.setitem(sys.modules, "webview", fake)
+    assert desktop.open_window("http://127.0.0.1:1") is False and config.DESKTOP is False
+    assert fake.settings["ALLOW_DOWNLOADS"] is True and calls["start"]["private_mode"] is False
+    assert calls["window"][1]["min_size"] == desktop.MIN_SIZE
+
+    # Erfolgreicher Start: blockiert bis zum Schließen und meldet True
+    fake.start = lambda *a, **k: None
+    assert desktop.open_window("http://127.0.0.1:1") is True and config.DESKTOP is True
+
+
+def test_callback_page_depends_on_window_mode(api, monkeypatch):
+    from settracker import config
+    from settracker.spotify import client
+
+    monkeypatch.setattr(client, "finish_login", lambda code: None)
+    assert api.get("/api/status").json()["desktop"] is False
+    browser = api.get("/callback", params={"code": "abc"}, follow_redirects=False)
+    assert browser.status_code == 307 and browser.headers["location"] == "/#/bibliothek"
+    monkeypatch.setattr(config, "DESKTOP", True)
+    window = api.get("/callback", params={"code": "abc"}, follow_redirects=False)
+    assert window.status_code == 200 and "Anmeldung erfolgreich" in window.text
+    assert api.get("/api/status").json()["desktop"] is True

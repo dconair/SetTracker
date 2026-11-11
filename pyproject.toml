@@ -22,7 +22,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
-build = ["pyinstaller>=6.10"]
+desktop = ["pywebview>=5.3"]
+build = ["pyinstaller>=6.10", "pywebview>=5.3"]
 
 [project.scripts]
 settracker = "settracker.cli:main"

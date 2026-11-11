@@ -24,3 +24,6 @@ AUDIO_EXTENSIONS = {".mp3", ".wav", ".flac", ".m4a", ".aac", ".ogg", ".aiff", ".
 def data_dir() -> Path:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     return DATA_DIR
+
+# True, solange die App in ihrem eigenen Programmfenster läuft (gesetzt von settracker.desktop).
+DESKTOP = False

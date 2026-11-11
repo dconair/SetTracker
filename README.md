@@ -45,8 +45,11 @@ warnt das System beim ersten Start:
   „SetTracker wurde blockiert“ auf **Dennoch öffnen** klicken.
 - **Windows:** Im SmartScreen-Fenster **Weitere Informationen → Trotzdem ausführen**.
 
-SetTracker hat kein eigenes Fenster: Beim Start öffnet sich die App im Browser unter http://127.0.0.1:8000.
-Ein erneuter Start öffnet nur wieder den Browser. Beendet wird über **Beenden** unten in der Seitenleiste.
+SetTracker öffnet sich in einem eigenen Programmfenster; das Fenster zu schließen beendet die App. Lässt
+sich das Fenster auf einem Rechner nicht öffnen (z. B. fehlendes WebView2 unter Windows), startet die App
+stattdessen im Standardbrowser unter http://127.0.0.1:8000 und wird dort über **Beenden** in der Seitenleiste
+geschlossen; der Grund steht dann in `settracker.log` im Ordner `.settracker`. Die Spotify-Anmeldung und der
+Spickzettel öffnen sich immer im Standardbrowser.
 Der erste Start und die erste Analyse dauern etwas länger. MP3, WAV, FLAC, OGG und AIFF funktionieren ohne
 Zusatzsoftware; für M4A/AAC muss [ffmpeg](https://ffmpeg.org/download.html) installiert sein.
 
@@ -69,6 +72,9 @@ pip install .
 ```bash
 settracker
 ```
+
+So läuft die App im Browser. Für das eigene Programmfenster zusätzlich `pip install ".[desktop]"` und mit
+`settracker --window` starten.
 
 Daten (Datenbank, Spotify-Zugang, Logdatei) liegen in beiden Fällen im Ordner `.settracker` in deinem
 Benutzerordner. Zum Ausprobieren ohne eigene Musik: in der leeren Bibliothek „Demo-Tracks laden“.

@@ -33,8 +33,18 @@ def smoke_test() -> int:
         path = Path(tmp) / "smoke.wav"
         sf.write(path, demo.synth(124, 9, False, (8, 16, 4, 8, 8)), demo.SR)
         fields = analyze_file(str(path))["fields"]
+    try:
+        import webview  # noqa: F401
+
+        window_lib = True
+    except Exception as exc:
+        window_lib = False
+        print(f"Fenster-Bibliothek fehlt: {exc!r}")
     ok = abs(fields["bpm"] - 124) <= 1 and (config.STATIC_DIR / "index.html").is_file()
-    print(f"Selbsttest {'ok' if ok else 'FEHLGESCHLAGEN'}: {fields['bpm']} BPM, {fields['camelot']}, Oberfläche vorhanden: {(config.STATIC_DIR / 'index.html').is_file()}")
+    if getattr(sys, "frozen", False):
+        ok = ok and window_lib  # die installierte App soll ihr eigenes Fenster öffnen können
+    print(f"Selbsttest {'ok' if ok else 'FEHLGESCHLAGEN'}: {fields['bpm']} BPM, {fields['camelot']}, "
+          f"Oberfläche vorhanden: {(config.STATIC_DIR / 'index.html').is_file()}, Fenster-Bibliothek: {window_lib}")
     return 0 if ok else 1
 
 
@@ -42,10 +52,16 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="settracker", description="DJ-Set-Planer starten")
     parser.add_argument("--port", type=int, default=config.PORT)
     parser.add_argument("--no-browser", action="store_true", help="Browser nicht automatisch öffnen")
+    parser.add_argument("--window", action="store_true", help="im eigenen Programmfenster öffnen (braucht pywebview)")
     parser.add_argument("--smoke-test", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
     if args.smoke_test:
         sys.exit(smoke_test())
+    if args.window:
+        from . import desktop
+
+        desktop.main(["--port", str(args.port)])
+        return
 
     url = f"http://{config.HOST}:{args.port}"
     if already_running(url):

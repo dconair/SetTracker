@@ -52,6 +52,24 @@ jobs:
           Get-Content "$env:SETTRACKER_DATA\settracker.log" -ErrorAction SilentlyContinue
           if ($p.ExitCode -ne 0) { throw "Selbsttest fehlgeschlagen (Exit $($p.ExitCode))" }
 
+      # Öffnet das Programmfenster wirklich, wartet auf die geladene Oberfläche und schließt es wieder.
+      # Nicht jeder Buildrechner kann ein Fenster anzeigen – deshalb bricht ein Fehlschlag den Build nicht ab,
+      # das Ergebnis steht aber im Protokoll dieses Schritts.
+      - name: Fenstertest (macOS)
+        if: runner.os == 'macOS'
+        continue-on-error: true
+        run: dist/SetTracker.app/Contents/MacOS/SetTracker --window-test
+
+      - name: Fenstertest (Windows)
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $env:SETTRACKER_DATA = "$env:RUNNER_TEMP\settracker-window"
+          $p = Start-Process -FilePath dist\SetTracker\SetTracker.exe -ArgumentList "--window-test" -Wait -PassThru
+          Get-Content "$env:SETTRACKER_DATA\settracker.log" -ErrorAction SilentlyContinue
+          if ($p.ExitCode -ne 0) { throw "Fenstertest fehlgeschlagen (Exit $($p.ExitCode))" }
+
       - name: DMG erstellen
         if: runner.os == 'macOS'
         run: |

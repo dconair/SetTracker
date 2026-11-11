@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { useStore } from "../store";
 import type { SpotifyCheck, SpotifyPlaylist, Track } from "../types";
-import { Button, Chip, cx, Empty, fmtBpm, fmtTime, IconButton, inputClass, KeyBadge, Menu, MenuItem, Meter, Modal, PageHeader, Select, SourceTag, TrackTitle, useAction, useToast } from "../ui";
+import { Button, Chip, cx, Empty, fmtBpm, fmtTime, IconButton, inputClass, KeyBadge, Menu, MenuItem, Meter, Modal, PageHeader, Select, SourceTag, TrackTitle, useAction, useDialog, useToast } from "../ui";
 
 type SortKey = "title" | "family" | "bpm" | "camelot" | "energy" | "duration";
 const NONE = "__none__";
@@ -22,6 +22,7 @@ export function SpotifyLogo({ size = 16 }: { size?: number }) {
 export function Library() {
   const { tracks, status, sets, refreshTracks, refreshSets, refreshStatus, playing, togglePlay, go, openTrack } = useStore();
   const run = useAction();
+  const dialogs = useDialog();
   const [family, setFamily] = useState("");
   const [source, setSource] = useState("");
   const [collection, setCollection] = useState("");
@@ -86,7 +87,7 @@ export function Library() {
 
   const addToSet = async (setId: number | null, ids: number[]) => {
     if (setId === null) {
-      const name = window.prompt("Name des neuen Sets", family && family !== NONE ? `${family} Set` : "Neues Set");
+      const name = await dialogs.ask("Neues Set", family && family !== NONE ? `${family} Set` : "Neues Set");
       if (!name) return;
       const created = await run(() => api.createSet(name, ids));
       if (created) { await refreshSets(); go(`sets/${created.id}`); }
@@ -191,7 +192,7 @@ export function Library() {
                 {(close) => (status?.families ?? []).map((f) => <MenuItem key={f} onClick={() => { close(); setGenre(picked, f); }}>{f}</MenuItem>)}
               </Menu>
               <Button size="sm" variant="danger" icon={<Trash2 size={15} />} onClick={async () => {
-                if (!window.confirm(`${picked.length} Tracks aus der Bibliothek entfernen? Die Dateien selbst bleiben erhalten.`)) return;
+                if (!(await dialogs.confirm(`${picked.length} Tracks aus der Bibliothek entfernen?`, "Die Dateien selbst bleiben erhalten.", { action: "Entfernen", danger: true }))) return;
                 await run(() => api.bulk(picked, { delete: true }), "Entfernt");
                 setSelected(new Set());
                 refreshTracks();
@@ -357,7 +358,13 @@ export function SpotifyDialog({ onClose, asSet, onImported }: { onClose: () => v
   const [busy, setBusy] = useState<string | null>(null);
   const [check, setCheck] = useState<SpotifyCheck | null>(null);
   const [checking, setChecking] = useState(false);
+  const [waiting, setWaiting] = useState(false);
   const sp = status?.spotify;
+  useEffect(() => {
+    if (!waiting || sp?.user) return;
+    const timer = setInterval(() => refreshStatus().catch(() => {}), 2000);
+    return () => clearInterval(timer);
+  }, [waiting, sp?.user, refreshStatus]);
   const runCheck = async () => {
     setChecking(true);
     setCheck((await run(() => api.spotifyCheck())) ?? null);
@@ -384,7 +391,12 @@ export function SpotifyDialog({ onClose, asSet, onImported }: { onClose: () => v
       ) : !sp.user ? (
         <div className="flex flex-col items-center py-6 text-center">
           <p className="max-w-sm text-muted">Melde dich an, damit SetTracker deine Playlists und Lieblingssongs lesen und fertige Sets als Playlist anlegen kann.</p>
-          <Button variant="primary" className="mt-5" icon={<SpotifyLogo />} onClick={async () => { const r = await run(() => api.spotifyLogin()); if (r) window.location.href = r.url; }}>Mit Spotify anmelden</Button>
+          <Button variant="primary" className="mt-5" icon={<SpotifyLogo />} onClick={async () => {
+            const r = await run(() => api.spotifyLogin());
+            if (!r) return;
+            if (status?.desktop) { window.open(r.url, "_blank"); setWaiting(true); } else window.location.href = r.url;
+          }}>Mit Spotify anmelden</Button>
+          {waiting && <p className="mt-3 text-[13px] text-accent">Die Anmeldung läuft in deinem Browser – danach geht es hier automatisch weiter.</p>}
           <p className="mt-5 max-w-md text-xs text-faint">
             Meldet Spotify „INVALID_CLIENT: Invalid redirect URI“? Dann fehlt in deiner Spotify-App unter „Redirect URIs“ genau diese Adresse:{" "}
             <code className="rounded bg-hover px-1.5 py-0.5 font-mono text-text select-all">{sp.redirect_uri}</code>

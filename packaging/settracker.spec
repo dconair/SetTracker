@@ -9,7 +9,8 @@ ROOT = Path(SPECPATH).parent
 datas = [(str(ROOT / "settracker" / "static"), "settracker/static")]
 binaries, hidden = [], []
 # librosa lädt seine Untermodule über Stub-Dateien (.pyi) nach – das ganze Paket samt Daten mitnehmen.
-for package in ("librosa", "soundfile", "soxr", "audioread", "lazy_loader"):
+# pywebview: eigenes Programmfenster (WebKit auf dem Mac, WebView2 unter Windows).
+for package in ("librosa", "soundfile", "soxr", "audioread", "lazy_loader", "webview"):
     d, b, h = collect_all(package)
     datas += d
     binaries += b
@@ -36,11 +37,9 @@ if sys.platform == "darwin":
         name="SetTracker.app",
         icon=icon,
         bundle_identifier="io.github.dconair.settracker",
-        version="0.1.0",
+        version="0.2.0",
         info_plist={
             "CFBundleDisplayName": "SetTracker",
             "NSHighResolutionCapable": True,
-            # Die App hat kein eigenes Fenster (Bedienung im Browser) – kein dauerhaftes Dock-Symbol.
-            "LSUIElement": True,
         },
     )

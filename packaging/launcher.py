@@ -13,7 +13,7 @@ if sys.stdout is None or sys.stderr is None:
     log = open(data / "settracker.log", "a", buffering=1, encoding="utf-8")
     sys.stdout = sys.stderr = log
 
-from settracker.cli import main  # noqa: E402
+from settracker.desktop import main  # noqa: E402
 
 if __name__ == "__main__":
     import multiprocessing

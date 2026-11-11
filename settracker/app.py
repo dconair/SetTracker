@@ -84,6 +84,7 @@ def status() -> dict:
     return {
         "analysis": library.status(),
         "spotify": {"configured": spotify.configured(), "user": user, "job": importer.status(), "redirect_uri": config.REDIRECT_URI},
+        "desktop": config.DESKTOP,
         "families": [f for f, _ in FAMILIES],
         "curves": sequence.CURVES,
         "templates": transitions.TEMPLATES,
@@ -305,6 +306,13 @@ def spotify_callback(code: str | None = None, error: str | None = None):
             f"Der Anmeldecode konnte nicht eingelöst werden ({str(exc)[:200]}). Häufigste Ursache: Client Secret falsch oder die "
             f"Redirect URI in der Spotify-App weicht von <code>{config.REDIRECT_URI}</code> ab.")
     db.kv_set("spotify_user", None)
+    if config.DESKTOP:
+        # Die Anmeldung lief im Standardbrowser; die App selbst ist das Programmfenster.
+        return HTMLResponse(
+            "<!doctype html><meta charset='utf-8'><title>SetTracker – Spotify</title>"
+            "<body style='font:15px/1.5 system-ui,sans-serif;background:#0a0c10;color:#e9ecf2;max-width:560px;margin:12vh auto;padding:0 24px'>"
+            "<h1 style='font-size:20px'>Anmeldung erfolgreich</h1>"
+            "<p style='color:#8d95a8'>Du kannst diesen Tab schließen und zu SetTracker zurückkehren.</p></body>")
     return RedirectResponse("/#/bibliothek")
 
 

@@ -123,6 +123,7 @@ export interface Review {
 }
 
 export interface Status {
+  desktop: boolean;
   analysis: { total: number; done: number; current: string; running: boolean };
   spotify: {
     configured: boolean;
