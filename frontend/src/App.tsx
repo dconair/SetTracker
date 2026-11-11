@@ -1,10 +1,11 @@
-import { AudioWaveform, Library as LibraryIcon, ListMusic, Check as CheckIcon, Loader2, Palette, Power, ScanSearch } from "lucide-react";
+import { AudioWaveform, GraduationCap, Library as LibraryIcon, ListMusic, Check as CheckIcon, Loader2, Palette, Power, ScanSearch } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { api } from "./api";
 import { StoreProvider, useStore } from "./store";
 import { ACCENTS, THEMES, useAppearance, WAVES, type Appearance } from "./theme";
 import { cx, DialogProvider, Modal, ToastProvider, useDialog } from "./ui";
 import { Check } from "./views/Check";
+import { Learn } from "./views/Learn";
 import { Library } from "./views/Library";
 import { TrackPanel } from "./views/TrackPanel";
 import { SetBuilder, SetList } from "./views/SetBuilder";
@@ -13,6 +14,7 @@ const NAV: { path: string; label: string; icon: ReactNode }[] = [
   { path: "bibliothek", label: "Bibliothek", icon: <LibraryIcon size={18} /> },
   { path: "sets", label: "Sets", icon: <ListMusic size={18} /> },
   { path: "check", label: "Playlist-Check", icon: <ScanSearch size={18} /> },
+  { path: "lernen", label: "Lernen", icon: <GraduationCap size={18} /> },
 ];
 
 function Shell() {
@@ -101,6 +103,7 @@ function Shell() {
       <main className="min-w-0 flex-1 overflow-y-auto">
         {page === "bibliothek" && <Library />}
         {page === "sets" && (route[1] ? <SetBuilder key={route[1]} id={Number(route[1])} /> : <SetList />)}
+        {page === "lernen" && <Learn />}
         {page === "check" && <Check id={route[1] ? Number(route[1]) : null} key={route[1] ?? "start"} />}
       </main>
       {detailId !== null && <TrackPanel id={detailId} onClose={() => openTrack(null)} />}

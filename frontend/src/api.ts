@@ -1,4 +1,4 @@
-import type { Changes, SpotifyCheck, TrackDetail, Review, SetInfo, SetView, SpotifyPlaylist, Status, Suggestion, Track, TransitionDetail, WaveData } from "./types";
+import type { Changes, Lesson, SpotifyCheck, TrackDetail, Review, SetInfo, SetView, SpotifyPlaylist, Status, Suggestion, Track, TransitionDetail, WaveData } from "./types";
 
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -28,6 +28,7 @@ const q = (params: Record<string, string | number | boolean | undefined | null>)
 
 export const api = {
   status: () => call<Status>("GET", "/api/status"),
+  lessons: () => call<Lesson[]>("GET", "/api/tutorial/transitions"),
   tracks: () => call<Track[]>("GET", "/api/tracks"),
   track: (id: number) => call<TrackDetail>("GET", `/api/tracks/${id}`),
   spotifyCheck: () => call<SpotifyCheck>("GET", "/api/spotify/check"),

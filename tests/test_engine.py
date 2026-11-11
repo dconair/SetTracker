@@ -163,3 +163,18 @@ def test_genre_outlier_and_mood_focus_orders_by_mood():
     assert jumps(with_mood) < jumps(list(range(6))) / 2
     r = review.review(mixed, [], focus="mood")
     assert r["recommend_rebuild"] and r["after"]["mood_score"] > r["before"]["mood_score"] and r["mood_gain"] > 0.2
+
+
+def test_steps_carry_bar_ranges_and_tutorial_lessons():
+    from settracker.engine import flx4, tutorial
+
+    assert flx4._bars("Takt 5–8") == (5, 8) and flx4._bars("Takt 3") == (3, 3)
+    assert flx4._bars("Nach Takt 16") == (17, 17) and flx4._bars("Vorbereitung") == (None, None)
+    lessons = tutorial.lessons()
+    assert {lesson["key"] for lesson in lessons} == set(transitions.TEMPLATES)
+    assert [lesson["difficulty"] for lesson in lessons] == sorted(lesson["difficulty"] for lesson in lessons)
+    for lesson in lessons:
+        assert lesson["summary"] and lesson["mistakes"] and len(lesson["steps"]) >= 4
+        assert all(s["when"] != "Hinweis" for s in lesson["steps"])
+        assert any(s["bar_from"] for s in lesson["steps"]) and any(s["controls"] for s in lesson["steps"])
+        assert "Track B" in lesson["steps"][0]["text"]

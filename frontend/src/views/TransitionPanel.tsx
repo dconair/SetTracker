@@ -1,7 +1,7 @@
 import { ChevronLeft, ChevronRight, Info, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { api, openExternal } from "../api";
-import { Flx4 } from "../Flx4";
+import { StepTrainer } from "../StepTrainer";
 import { useStore } from "../store";
 import type { Plan, Track, TransitionDetail, WaveData } from "../types";
 import { Button, cx, fmtBpm, IconButton, KeyBadge, ScoreBadge, verdictColor } from "../ui";
@@ -14,11 +14,9 @@ export function TransitionPanel({ setId, index, total, onClose, onNavigate }: { 
   const { status } = useStore();
   const [detail, setDetail] = useState<TransitionDetail | null>(null);
   const [waves, setWaves] = useState<{ a: WaveData | null; b: WaveData | null }>({ a: null, b: null });
-  const [stepIndex, setStepIndex] = useState(0);
 
   useEffect(() => {
     setDetail(null);
-    setStepIndex(0);
     setWaves({ a: null, b: null });
     api.transition(setId, index).then((d) => {
       setDetail(d);
@@ -37,7 +35,7 @@ export function TransitionPanel({ setId, index, total, onClose, onNavigate }: { 
     return () => window.removeEventListener("keydown", onKey);
   }, [index, total, onClose, onNavigate]);
 
-  const choose = (template: string) => api.transition(setId, index, template).then((d) => { setDetail(d); setStepIndex(0); });
+  const choose = (template: string) => api.transition(setId, index, template).then(setDetail);
   const plan = detail?.plan;
 
   return (
@@ -105,34 +103,7 @@ export function TransitionPanel({ setId, index, total, onClose, onNavigate }: { 
                 <h3 className="font-semibold">Schritt für Schritt am DDJ-FLX4</h3>
                 <Button size="sm" variant="ghost" onClick={() => openExternal(`/api/sets/${setId}/export/cheatsheet.html`, status?.desktop).catch(() => {})}>Spickzettel öffnen</Button>
               </div>
-              <div className="sticky top-0 z-10 rounded-xl border border-line bg-surface p-3" style={{ boxShadow: "var(--shadow)" }}>
-                <Flx4 active={plan.steps[stepIndex]?.controls ?? []} />
-                <div className="mt-2 flex items-center gap-3">
-                  <Button size="sm" disabled={stepIndex === 0} onClick={() => setStepIndex(stepIndex - 1)} icon={<ChevronLeft size={15} />}>Zurück</Button>
-                  <div className="min-w-0 flex-1 text-center text-[13px]">
-                    <span className="font-semibold text-accent">Schritt {stepIndex + 1}/{plan.steps.length} · {plan.steps[stepIndex]?.when}</span>
-                    {plan.steps[stepIndex]?.controls.length === 0 && <span className="text-faint"> · kein Bedienelement</span>}
-                  </div>
-                  <Button size="sm" variant="primary" disabled={stepIndex >= plan.steps.length - 1} onClick={() => setStepIndex(stepIndex + 1)}>Weiter <ChevronRight size={15} /></Button>
-                </div>
-              </div>
-              <ol className="mt-3 overflow-hidden rounded-xl border border-line bg-surface">
-                {plan.steps.map((step, i) => (
-                  <li key={i}>
-                    <button onClick={() => setStepIndex(i)} aria-current={i === stepIndex ? "step" : undefined}
-                      className={cx("flex w-full gap-3 border-b border-line/70 px-4 py-3 text-left transition-colors", i === stepIndex ? "bg-accent-soft" : "hover:bg-hover")}>
-                      <span className={cx("num mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold", i === stepIndex ? "bg-accent text-accent-fg" : "bg-hover text-muted")}>{i + 1}</span>
-                      <span className="min-w-0 flex-1">
-                        <span className="mb-0.5 flex items-center gap-2 text-xs">
-                          <span className="font-semibold text-accent">{step.when}</span>
-                          {step.deck && <span className="rounded bg-hover px-1.5 py-px font-medium text-muted">Deck {step.deck}</span>}
-                        </span>
-                        <span className="block text-[13px] leading-relaxed">{step.text}</span>
-                      </span>
-                    </button>
-                  </li>
-                ))}
-              </ol>
+              <StepTrainer steps={plan.steps} bpm={plan.tempo?.target_bpm ?? detail.a.bpm ?? 124} template={plan.template} bars={plan.bars} />
             </section>
           </div>
         )}

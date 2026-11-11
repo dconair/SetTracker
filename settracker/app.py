@@ -10,7 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import config, db, library
-from .engine import compat, cues as cue_engine, review as review_engine, sequence, suggest as suggest_engine, transitions
+from .engine import compat, cues as cue_engine, review as review_engine, tutorial, sequence, suggest as suggest_engine, transitions
 from .export import cheatsheet, m3u, rekordbox_xml
 from .music import FAMILIES, genre_family, key_name, mood_label
 from .spotify import client as spotify, importer, reccobeats
@@ -736,6 +736,12 @@ def open_external(body: External) -> dict:
     if not webbrowser.open(url):
         raise HTTPException(500, "Der Browser ließ sich nicht öffnen")
     return {"ok": True}
+
+
+@app.get("/api/tutorial/transitions")
+def tutorial_transitions() -> list[dict]:
+    """Lernbereich: Übergangsarten mit Erklärung und Übungsschritten."""
+    return tutorial.lessons()
 
 
 class Quit(BaseModel):

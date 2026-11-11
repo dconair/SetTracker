@@ -143,6 +143,24 @@ Der rekordbox-Export schreibt Hot Cues und Loops in die XML, alle Phasen zusätz
 Memory Cues. Die Phasen-Erkennung arbeitet über Energie- und Bassverlauf je Takt; bei Tracks ohne klare
 Struktur bitte in rekordbox gegenprüfen.
 
+## Lernen
+
+Der Bereich **Lernen** funktioniert ohne angeschlossenen Controller:
+
+- **Takte & Phrasen zählen** – ein Übungs-Beat mit einstellbarem Tempo, Zählfelder und eine Phrasen-Uhr
+  (8 Takte = 32 Schläge). In der Übung drückst du die Leertaste auf die Eins einer neuen Phrase und siehst,
+  wie genau du getroffen hast. Dazu: ein Vergleich „auf der Eins gestartet / daneben“ und der typische
+  Bauplan eines Tracks mit den zugehörigen Pads.
+- **Übergänge** – jede Übergangsart mit Einsatzgebiet, Hörtipps und typischen Fehlern. Der Trainer hat drei
+  Modi: *Anleitung* (Schritte lesen, Regler leuchten), *Üben* (die richtigen Regler am Schema anklicken) und
+  *Ablauf im Takt* (ein Beat läuft, die Schritte werden zum passenden Takt aktiv). Das Diagramm „Was die
+  Regler machen“ zeigt Lautstärke, Bass und Filter über die Takte.
+- **Tonarten** – das Camelot-Rad zum Anklicken: welche Tonarten zur gewählten passen.
+- **Controller** – jedes Bedienelement des DDJ-FLX4 erklärt. **Tipps** – kurze Regeln fürs Üben und Mixen.
+
+Derselbe Trainer steht bei jedem Übergang im Set zur Verfügung, dort mit den Zeitmarken deiner Tracks.
+Das Controller-Schema ist eine vereinfachte Draufsicht; der Übungs-Beat kommt aus dem Browser-Synthesizer.
+
 ## Darstellung
 
 Unter **Darstellung** in der Seitenleiste: sechs Designs (Studio, Mitternacht, Club, Vinyl, Papier, Sand),

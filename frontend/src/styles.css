@@ -133,3 +133,14 @@ button:disabled { cursor: not-allowed; }
 .flx-on .flx-track { fill: var(--accent); }
 @keyframes flx-pulse { 50% { filter: drop-shadow(0 0 12px var(--accent)); } }
 @media (prefers-reduced-motion: reduce) { .flx-on .flx-shape { animation: none; } }
+.flx-pick { cursor: pointer; }
+.flx-pick:hover .flx-shape { stroke: var(--muted); }
+.flx-done .flx-shape { fill: var(--good); stroke: var(--good); filter: none; animation: none; }
+.flx-done .flx-label.flx-in, .flx-wrong .flx-label.flx-in { fill: #0a0c10; }
+.flx-done .flx-mark, .flx-wrong .flx-mark { stroke: #0a0c10; }
+.flx-done .flx-track { fill: var(--good); }
+.flx-wrong .flx-shape { fill: var(--bad); stroke: var(--bad); animation: flx-shake 0.3s; }
+@keyframes flx-shake { 25% { transform: translateX(-2px); } 75% { transform: translateX(2px); } }
+@keyframes beat-pop { from { transform: scale(1.18); } to { transform: scale(1); } }
+.beat-pop { animation: beat-pop 0.18s ease-out; }
+@media (prefers-reduced-motion: reduce) { .flx-wrong .flx-shape, .beat-pop { animation: none; } }

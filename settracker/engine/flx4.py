@@ -7,8 +7,22 @@ Elemente, die es nur einmal gibt (browse, crossfader, smart_fader, beatfx_*).
 from __future__ import annotations
 
 
+def _bars(when: str) -> tuple[int | None, int | None]:
+    """Taktbereich eines Schritts aus seiner Zeitangabe („Takt 5–8“, „Nach Takt 16“); sonst (None, None)."""
+    import re
+
+    m = re.match(r"Nach Takt (\d+)", when)
+    if m:
+        return int(m.group(1)) + 1, int(m.group(1)) + 1
+    m = re.match(r"Takt (\d+)(?:–(\d+))?", when)
+    if m:
+        return int(m.group(1)), int(m.group(2) or m.group(1))
+    return None, None
+
+
 def _step(when: str, text: str, deck: int | None = None, controls: list[str] | None = None) -> dict:
-    return {"when": when, "deck": deck, "text": text, "controls": controls or []}
+    bar_from, bar_to = _bars(when)
+    return {"when": when, "deck": deck, "text": text, "controls": controls or [], "bar_from": bar_from, "bar_to": bar_to}
 
 
 def _estimate_out(a: dict, bars: int) -> str | None:
