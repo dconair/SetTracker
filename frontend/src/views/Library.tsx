@@ -1,6 +1,6 @@
 import { ArrowDown, ArrowUp, ChevronRight, CornerLeftUp, Folder, FolderPlus, Heart, ListPlus, Music2, Pause, Play, Search, Sparkles, Tags, Trash2, TriangleAlert } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { api } from "../api";
+import { api, openExternal } from "../api";
 import { useStore } from "../store";
 import type { SpotifyCheck, SpotifyPlaylist, Track } from "../types";
 import { Button, Chip, cx, Empty, fmtBpm, fmtTime, IconButton, inputClass, KeyBadge, Menu, MenuItem, Meter, Modal, PageHeader, Select, SourceTag, TrackTitle, useAction, useDialog, useToast } from "../ui";
@@ -359,6 +359,7 @@ export function SpotifyDialog({ onClose, asSet, onImported }: { onClose: () => v
   const [check, setCheck] = useState<SpotifyCheck | null>(null);
   const [checking, setChecking] = useState(false);
   const [waiting, setWaiting] = useState(false);
+  const [loginUrl, setLoginUrl] = useState("");
   const sp = status?.spotify;
   useEffect(() => {
     if (!waiting || sp?.user) return;
@@ -394,11 +395,21 @@ export function SpotifyDialog({ onClose, asSet, onImported }: { onClose: () => v
           <Button variant="primary" className="mt-5" icon={<SpotifyLogo />} onClick={async () => {
             const r = await run(() => api.spotifyLogin());
             if (!r) return;
-            if (status?.desktop) { window.open(r.url, "_blank"); setWaiting(true); } else window.location.href = r.url;
+            if (!status?.desktop) { window.location.href = r.url; return; }
+            setLoginUrl(r.url);
+            setWaiting(true);
+            await run(() => openExternal(r.url, true));
           }}>Mit Spotify anmelden</Button>
-          {waiting && <p className="mt-3 text-[13px] text-accent">Die Anmeldung läuft in deinem Browser – danach geht es hier automatisch weiter.</p>}
+          {waiting && (
+            <div className="mt-4 w-full max-w-md text-[13px]">
+              <p className="text-accent">Die Spotify-Anmeldung wurde in deinem Browser geöffnet. Nach dem Bestätigen geht es hier automatisch weiter.</p>
+              <p className="mt-3 text-muted">Kein Browserfenster aufgegangen? Dann diese Adresse kopieren und im Browser einfügen:</p>
+              <input readOnly value={loginUrl} onFocus={(e) => e.target.select()} className={cx(inputClass, "mt-1.5 w-full font-mono text-xs")} aria-label="Anmelde-Adresse" />
+            </div>
+          )}
           <p className="mt-5 max-w-md text-xs text-faint">
-            Meldet Spotify „INVALID_CLIENT: Invalid redirect URI“? Dann fehlt in deiner Spotify-App unter „Redirect URIs“ genau diese Adresse:{" "}
+            Meldet Spotify „INVALID_CLIENT: Invalid redirect URI“? Dann fehlt im Spotify Developer Dashboard bei deiner App unter „Redirect URIs“ dieser Eintrag
+            (nur dort eintragen, nicht im Browser öffnen):{" "}
             <code className="rounded bg-hover px-1.5 py-0.5 font-mono text-text select-all">{sp.redirect_uri}</code>
           </p>
         </div>

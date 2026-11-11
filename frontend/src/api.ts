@@ -42,6 +42,7 @@ export const api = {
   spotifyLogin: () => call<{ url: string }>("GET", "/api/spotify/login"),
   spotifyCredentials: (client_id: string, client_secret: string) => call("POST", "/api/spotify/credentials", { client_id, client_secret }),
   quit: () => call("POST", "/api/quit", { confirm: true }),
+  openExternal: (url: string) => call("POST", "/api/open-external", { url }),
   spotifyLogout: () => call("POST", "/api/spotify/logout"),
   spotifyPlaylists: () => call<SpotifyPlaylist[]>("GET", "/api/spotify/playlists"),
   spotifyImport: (body: { playlist_id?: string; liked?: boolean; as_set?: boolean }) =>
@@ -75,3 +76,10 @@ export const api = {
   },
   exportSpotify: (id: number) => call<{ url: string; added: number; missing: string[] }>("POST", `/api/sets/${id}/export/spotify`),
 };
+
+/** Öffnet eine Adresse im Browser. Im Programmfenster übernimmt das der Server, weil das
+ *  eingebettete Fenster neue Browserfenster blockieren kann. */
+export async function openExternal(url: string, desktop: boolean | undefined): Promise<void> {
+  if (desktop) await api.openExternal(url);
+  else window.open(url, "_blank");
+}

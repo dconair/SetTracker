@@ -37,7 +37,7 @@ if sys.platform == "darwin":
         name="SetTracker.app",
         icon=icon,
         bundle_identifier="io.github.dconair.settracker",
-        version="0.2.0",
+        version="0.2.1",
         info_plist={
             "CFBundleDisplayName": "SetTracker",
             "NSHighResolutionCapable": True,

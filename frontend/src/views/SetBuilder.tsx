@@ -3,7 +3,7 @@ import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, v
 import { CSS } from "@dnd-kit/utilities";
 import { ArrowLeft, CheckCircle2, ChevronDown, ClipboardCopy, Compass, Download, FolderPlus, RefreshCw, FileCode2, FileText, GripVertical, ListMusic, ListPlus, Pin, Plus, Printer, ScanSearch, Sparkles, Trash2, Wand2, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api } from "../api";
+import { api, openExternal } from "../api";
 import { useStore } from "../store";
 import type { SetView, Suggestion, Track, Transition } from "../types";
 import { Button, Card, cx, Empty, fmtBpm, fmtLong, IconButton, KeyBadge, Menu, MenuItem, Meter, Modal, PageHeader, ScoreBadge, Select, changesText, SourceTag, TrackTitle, useAction, useDialog, useToast, verdictColor } from "../ui";
@@ -148,7 +148,7 @@ export function SetBuilder({ id }: { id: number }) {
             <MenuItem icon={<SpotifyLogo size={15} />} onClick={async () => { close(); const r = await run(() => api.exportSpotify(id)); if (r) setExported(r); }}>Als Spotify-Playlist anlegen</MenuItem>
             <MenuItem icon={<FileCode2 size={15} />} onClick={() => { close(); window.location.href = `/api/sets/${id}/export/rekordbox.xml`; }}>rekordbox-XML mit Hot Cues</MenuItem>
             <MenuItem icon={<FileText size={15} />} onClick={() => { close(); window.location.href = `/api/sets/${id}/export/playlist.m3u`; }}>M3U-Playlist</MenuItem>
-            <MenuItem icon={<Printer size={15} />} onClick={() => { close(); window.open(`/api/sets/${id}/export/cheatsheet.html`, "_blank"); }}>Spickzettel mit FLX4-Schritten</MenuItem>
+            <MenuItem icon={<Printer size={15} />} onClick={() => { close(); run(() => openExternal(`/api/sets/${id}/export/cheatsheet.html`, status?.desktop)); }}>Spickzettel mit FLX4-Schritten</MenuItem>
             </>}
             <div className="my-1 border-t border-line" />
             <MenuItem danger icon={<Trash2 size={15} />} onClick={async () => { close(); if (await dialog.confirm(`Set „${view.name}“ löschen?`, "Die Tracks bleiben in der Bibliothek.", { action: "Löschen", danger: true })) { await run(() => api.deleteSet(id)); await refreshSets(); go("sets"); } }}>Set löschen</MenuItem>
@@ -253,7 +253,7 @@ export function SetBuilder({ id }: { id: number }) {
       {exported && (
         <Modal title="Spotify-Playlist angelegt" onClose={() => setExported(null)} footer={<>
           <Button variant="ghost" onClick={() => setExported(null)}>Schließen</Button>
-          <Button variant="primary" icon={<SpotifyLogo />} onClick={() => window.open(exported.url, "_blank")}>In Spotify öffnen</Button>
+          <Button variant="primary" icon={<SpotifyLogo />} onClick={() => run(() => openExternal(exported.url, status?.desktop))}>In Spotify öffnen</Button>
         </>}>
           <p>{exported.added} Tracks wurden in die neue private Playlist „{view.name}“ übernommen. In rekordbox findest du sie mit Spotify Premium unter „Spotify“ und kannst sie direkt auf den DDJ-FLX4 laden.</p>
           {exported.missing.length > 0 && <>

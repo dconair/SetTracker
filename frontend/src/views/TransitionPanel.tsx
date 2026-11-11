@@ -1,6 +1,6 @@
 import { ChevronLeft, ChevronRight, Info, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { api } from "../api";
+import { api, openExternal } from "../api";
 import { Flx4 } from "../Flx4";
 import { useStore } from "../store";
 import type { Plan, Track, TransitionDetail, WaveData } from "../types";
@@ -103,7 +103,7 @@ export function TransitionPanel({ setId, index, total, onClose, onNavigate }: { 
             <section>
               <div className="mb-2 flex items-center justify-between">
                 <h3 className="font-semibold">Schritt für Schritt am DDJ-FLX4</h3>
-                <Button size="sm" variant="ghost" onClick={() => window.open(`/api/sets/${setId}/export/cheatsheet.html`, "_blank")}>Spickzettel öffnen</Button>
+                <Button size="sm" variant="ghost" onClick={() => openExternal(`/api/sets/${setId}/export/cheatsheet.html`, status?.desktop).catch(() => {})}>Spickzettel öffnen</Button>
               </div>
               <div className="sticky top-0 z-10 rounded-xl border border-line bg-surface p-3" style={{ boxShadow: "var(--shadow)" }}>
                 <Flx4 active={plan.steps[stepIndex]?.controls ?? []} />

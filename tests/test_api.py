@@ -289,3 +289,22 @@ def test_callback_page_depends_on_window_mode(api, monkeypatch):
     window = api.get("/callback", params={"code": "abc"}, follow_redirects=False)
     assert window.status_code == 200 and "Anmeldung erfolgreich" in window.text
     assert api.get("/api/status").json()["desktop"] is True
+
+
+def test_open_external_only_allows_spotify_and_own_pages(api, monkeypatch):
+    import webbrowser
+
+    opened = []
+    monkeypatch.setattr(webbrowser, "open", lambda url: opened.append(url) or True)
+    ok = api.post("/api/open-external", json={"url": "https://accounts.spotify.com/authorize?client_id=x&redirect_uri=http%3A%2F%2F127.0.0.1%3A8000%2Fcallback"})
+    assert ok.status_code == 200 and opened[-1].startswith("https://accounts.spotify.com/authorize?client_id=x&redirect_uri=http%3A")
+    assert api.post("/api/open-external", json={"url": "/api/sets/1/export/cheatsheet.html"}).status_code == 200
+    assert opened[-1] == "http://127.0.0.1:8000/api/sets/1/export/cheatsheet.html"
+    for bad in ("https://example.org/", "http://accounts.spotify.com/x", "file:///etc/passwd", "https://accounts.spotify.com.evil.org/", "javascript:alert(1)"):
+        assert api.post("/api/open-external", json={"url": bad}).status_code == 400, bad
+    assert len(opened) == 2
+
+
+def test_bare_callback_explains_itself(api):
+    page = api.get("/callback")
+    assert page.status_code == 400 and "Rücksprungziel" in page.text and "kein Code" not in page.text

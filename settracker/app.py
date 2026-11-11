@@ -295,8 +295,14 @@ def _login_page(title: str, text: str) -> HTMLResponse:
 
 @app.get("/callback")
 def spotify_callback(code: str | None = None, error: str | None = None):
-    if error or not code:
-        reason = "Du hast die Freigabe abgelehnt." if error == "access_denied" else f"Spotify meldet: {error or 'kein Code erhalten'}."
+    if not code and not error:
+        # Direkt aufgerufen, nicht von Spotify zurückgeleitet
+        return _login_page(
+            "Diese Seite ist nur das Rücksprungziel",
+            "Hierher leitet Spotify nach der Anmeldung automatisch zurück – die Adresse selbst zu öffnen bewirkt nichts. "
+            "Starte die Anmeldung in SetTracker über „Spotify importieren“ → „Mit Spotify anmelden“.")
+    if error:
+        reason = "Du hast die Freigabe abgelehnt." if error == "access_denied" else f"Spotify meldet: {error}."
         return _login_page("Spotify-Anmeldung nicht abgeschlossen", reason)
     try:
         spotify.finish_login(code)
@@ -700,6 +706,36 @@ def export_spotify(set_id: int) -> dict:
         raise HTTPException(400, "Keiner der Tracks wurde bei Spotify gefunden")
     result = spotify_call(spotify.create_playlist, s["name"], ids, "Erstellt mit SetTracker")
     return {**result, "added": len(ids), "missing": missing}
+
+
+EXTERNAL_HOSTS = {"accounts.spotify.com", "open.spotify.com", "developer.spotify.com"}
+
+
+class External(BaseModel):
+    url: str
+
+
+@app.post("/api/open-external")
+def open_external(body: External) -> dict:
+    """Öffnet eine Adresse im Standardbrowser des Rechners.
+
+    Das eingebettete Programmfenster darf selbst keine neuen Browserfenster öffnen (das wird nach
+    einer Hintergrundabfrage stillschweigend blockiert), deshalb übernimmt das der Server.
+    Erlaubt sind nur Spotify-Seiten und eigene Seiten dieser App.
+    """
+    import webbrowser
+    from urllib.parse import urlparse
+
+    url = body.url
+    if url.startswith("/api/"):
+        url = f"http://{config.HOST}:{config.PORT}{url}"
+    else:
+        parsed = urlparse(url)
+        if parsed.scheme != "https" or parsed.hostname not in EXTERNAL_HOSTS:
+            raise HTTPException(400, "Diese Adresse darf nicht geöffnet werden")
+    if not webbrowser.open(url):
+        raise HTTPException(500, "Der Browser ließ sich nicht öffnen")
+    return {"ok": True}
 
 
 class Quit(BaseModel):
