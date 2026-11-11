@@ -53,21 +53,24 @@ jobs:
           if ($p.ExitCode -ne 0) { throw "Selbsttest fehlgeschlagen (Exit $($p.ExitCode))" }
 
       # Öffnet das Programmfenster wirklich, wartet auf die geladene Oberfläche und schließt es wieder.
-      # Nicht jeder Buildrechner kann ein Fenster anzeigen – deshalb bricht ein Fehlschlag den Build nicht ab,
-      # das Ergebnis steht aber im Protokoll dieses Schritts.
+      # Das Ergebnis steht in der Zusammenfassung des Laufs; ein Fehlschlag bricht den Build ab.
       - name: Fenstertest (macOS)
         if: runner.os == 'macOS'
-        continue-on-error: true
-        run: dist/SetTracker.app/Contents/MacOS/SetTracker --window-test
+        run: |
+          set -o pipefail
+          dist/SetTracker.app/Contents/MacOS/SetTracker --window-test 2>&1 | tee window-test.log
+          echo "**macOS:** $(grep 'Fenstertest' window-test.log | tail -1)" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Fenstertest (Windows)
         if: runner.os == 'Windows'
-        continue-on-error: true
         shell: pwsh
         run: |
           $env:SETTRACKER_DATA = "$env:RUNNER_TEMP\settracker-window"
           $p = Start-Process -FilePath dist\SetTracker\SetTracker.exe -ArgumentList "--window-test" -Wait -PassThru
-          Get-Content "$env:SETTRACKER_DATA\settracker.log" -ErrorAction SilentlyContinue
+          $log = Get-Content "$env:SETTRACKER_DATA\settracker.log" -ErrorAction SilentlyContinue
+          $log
+          $line = ($log | Select-String "Fenstertest" | Select-Object -Last 1)
+          "**Windows:** $line (Exit $($p.ExitCode))" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           if ($p.ExitCode -ne 0) { throw "Fenstertest fehlgeschlagen (Exit $($p.ExitCode))" }
 
       - name: DMG erstellen
