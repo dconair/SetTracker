@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Automation, Curve } from "./types";
 import { cx } from "./ui";
 
@@ -162,6 +162,12 @@ const OFFSETS: [number, string, string][] = [
 /** Zwei Tracks übereinander: Was passiert, wenn B nicht auf der Eins einer Phrase startet? */
 export function AlignmentDemo() {
   const [choice, setChoice] = useState(0);
+  const [auto, setAuto] = useState(false);
+  useEffect(() => {
+    if (!auto) return;
+    const t = window.setTimeout(() => { if (choice >= OFFSETS.length - 1) { setAuto(false); setChoice(0); } else setChoice(choice + 1); }, 4500);
+    return () => window.clearTimeout(t);
+  }, [auto, choice]);
   const [offset, , text] = OFFSETS[choice];
   const W = 640, bar = 16, x0 = 70, row = 34;
   const blocksA: [number, number, string, string][] = [[0, 16, "Hauptteil", "#ffa23e"], [16, 8, "Outro", "#f2617a"]];
@@ -179,9 +185,10 @@ export function AlignmentDemo() {
     <div>
       <div className="mb-3 flex flex-wrap gap-2">
         {OFFSETS.map(([, label], i) => (
-          <button key={label} onClick={() => setChoice(i)} aria-pressed={choice === i}
+          <button key={label} onClick={() => { setAuto(false); setChoice(i); }} aria-pressed={choice === i}
             className={cx("h-8 rounded-full border px-3 text-[13px] font-medium transition-colors", choice === i ? "border-accent bg-accent-soft text-accent" : "border-line text-muted hover:bg-hover hover:text-text")}>{label}</button>
         ))}
+        <button onClick={() => { if (!auto) setChoice(0); setAuto(!auto); }} className="ml-auto h-8 rounded-full border border-line px-3 text-[13px] font-medium text-muted hover:bg-hover hover:text-text">{auto ? "■ Anhalten" : "▶ Alle der Reihe nach zeigen"}</button>
       </div>
       <svg viewBox={`0 0 ${W} 132`} className="block w-full" role="img" aria-label="Phrasen zweier Tracks im Vergleich">
         <text x={0} y={39} fontSize={11} fontWeight={600} fill="var(--text)">Track A</text>

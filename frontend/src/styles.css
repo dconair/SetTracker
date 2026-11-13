@@ -144,3 +144,14 @@ button:disabled { cursor: not-allowed; }
 @keyframes beat-pop { from { transform: scale(1.18); } to { transform: scale(1); } }
 .beat-pop { animation: beat-pop 0.18s ease-out; }
 @media (prefers-reduced-motion: reduce) { .flx-wrong .flx-shape, .beat-pop { animation: none; } }
+
+/* Tutorial: Fokus, Richtungspfeile, Werte */
+.flx { transition: opacity 0.35s; }
+.flx-zoomed .flx:not(.flx-on):not(.flx-done) { opacity: 0.38; }
+.flx-tick { stroke: var(--faint); stroke-width: 0.9; opacity: 0.6; }
+.flx-arrow line, .flx-arrow > path:first-child { stroke: var(--text); stroke-width: 2; stroke-linecap: round; fill: none; }
+.flx-arrowhead { fill: var(--text); stroke: none; }
+.flx-value { fill: var(--text); font: 700 7.5px var(--font-sans); text-anchor: middle; paint-order: stroke; stroke: var(--bg); stroke-width: 2.5px; }
+@keyframes caption-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+.caption-in { animation: caption-in 0.35s ease-out both; }
+@media (prefers-reduced-motion: reduce) { .caption-in { animation: none; } }

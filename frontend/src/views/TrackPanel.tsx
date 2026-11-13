@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useStore } from "../store";
 import type { Track, TrackDetail, WaveData } from "../types";
-import { Button, cx, fmtBpm, fmtTime, IconButton, inputClass, KeyBadge, Select, SourceTag, useAction, useToast } from "../ui";
+import { Button, cx, fmtBpm, fmtTime, IconButton, inputClass, KeyBadge, PhaseStrip, Select, SourceTag, useAction, useToast } from "../ui";
 import { Waveform, type Marker } from "../Waveform";
 
 export const cueColor = (name: string) =>
@@ -90,6 +90,14 @@ export function TrackPanel({ id, onClose }: { id: number; onClose: () => void })
                   <b className="font-medium text-text">Nur bei Spotify – keine Audiodatei.</b> Spotify gibt weder Audio noch Strukturdaten heraus, deshalb lassen sich
                   Intro, Drop und Break hier nicht erkennen. Die Marken unten sind ein <b className="font-medium text-text">Raster alle 16 Takte</b> als Orientierung;
                   setze sie in rekordbox nach Gehör. Liegt der Track als Datei vor, füge den Ordner hinzu – dann wird er automatisch zugeordnet und taktgenau analysiert.
+                  {track.phases.length > 0 && (
+                    <span className="mt-3 block">
+                      <PhaseStrip strip={track.strip} />
+                      <span className="mt-2 flex flex-wrap gap-1.5">
+                        {track.phases.map((ph) => <span key={ph.bar} className="num rounded bg-hover px-1.5 py-0.5 font-mono text-[11px]">{ph.name} · {ph.label}</span>)}
+                      </span>
+                    </span>
+                  )}
                   <span className="mt-2.5 block">
                     <Button size="sm" icon={<Link2 size={15} />} onClick={async () => setCandidates((await run(() => api.linkCandidates(id))) ?? [])}>Vorhandene Datei von Hand zuordnen</Button>
                   </span>

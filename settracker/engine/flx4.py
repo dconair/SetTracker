@@ -144,7 +144,8 @@ def steps_for(plan: dict, a: dict, b: dict) -> list[dict]:
     if start:
         text = ", ".join(f"{_KNOB[lane.rsplit('_', 1)[0]]} auf {clock(v)}" for lane, v in start)
         why = "So kommt der neue Track ohne Bass bzw. gedämpft herein und stört den laufenden nicht."
-        steps.append({**_step("Vorbereitung", f"Deck {db} einstellen: {text}. Alle übrigen EQ-Regler auf 12 Uhr.", db, [ctrl(lane) for lane, _ in start]), "why": why})
+        steps.append({**_step("Vorbereitung", f"Deck {db} einstellen: {text}. Alle übrigen EQ-Regler auf 12 Uhr.", db, [ctrl(lane) for lane, _ in start]), "why": why,
+                      "parts": [{"control": ctrl(lane), "from": 0.5, "to": v, "jump": False} for lane, v in start]})
     if "echo" in curves:
         steps.append({**_step("Vorbereitung", f"BEAT FX: mit BEAT FX SELECT „ECHO“ wählen, Kanalwahlschalter auf {da}, mit BEAT ◀/▶ auf 1/2 Beat, LEVEL/DEPTH auf 12 Uhr.", da,
                               ["beatfx_select", "beatfx_ch", "beatfx_beat", "beatfx_depth"]), "why": "Das Echo wird vorbereitet, aber erst im Übergang eingeschaltet."})
@@ -180,7 +181,8 @@ def steps_for(plan: dict, a: dict, b: dict) -> list[dict]:
             parts = [(text.replace("gleichmäßig", "zügig"), why) for text, why in parts]
         decks = {da if e["lane"].endswith("_a") else db for e in group if e["lane"] != "crossfader"}
         text = "; gleichzeitig ".join(p[0] for p in parts) + "."
-        moves.append({**_step(_when(b0, b1), text, decks.pop() if len(decks) == 1 else None, [ctrl(e["lane"]) for e in group]), "why": parts[0][1], "_bar": b0})
+        moves.append({**_step(_when(b0, b1), text, decks.pop() if len(decks) == 1 else None, [ctrl(e["lane"]) for e in group]), "why": parts[0][1], "_bar": b0,
+                      "parts": [{"control": ctrl(e["lane"]), "from": e["v0"], "to": e["v1"], "jump": b0 == b1 or b1 - b0 < 1} for e in group]})
     # PLAY von Deck B an der richtigen Stelle einsortieren
     before = [m for m in moves if m["_bar"] < b_start]
     after = [m for m in moves if m["_bar"] >= b_start]
@@ -195,6 +197,15 @@ def steps_for(plan: dict, a: dict, b: dict) -> list[dict]:
                   "why": "Zurückgestellte Regler verhindern, dass der nächste Track versehentlich ohne Bass oder mit Filter startet."})
     for st in steps:
         st.setdefault("why", "")
+        st.setdefault("parts", [])   # Einzelbewegungen: Bedienelement, Start- und Zielstellung
+        if st["when"].startswith("Vorbereitung"):
+            st["phase"] = "Vorbereitung"
+        elif st["when"].startswith(("Nach Takt", "Danach")):
+            st["phase"] = "Abschluss"
+        elif st is play or (st["bar_from"] == 1 and not st["parts"]):
+            st["phase"] = "Einstieg"
+        else:
+            st["phase"] = "Überblenden"
     if not plan["precise"]:
-        steps.append({**_step("Hinweis", "Mindestens einer der beiden Tracks liegt nur bei Spotify vor – ohne Audiodatei gibt es keine taktgenauen Marken. Zeitangaben sind Schätzungen aus Tempo und Länge; Mix-Punkte bitte nach Gehör und Waveform in rekordbox setzen."), "why": ""})
+        steps.append({"parts": [], "phase": "Hinweis", **_step("Hinweis", "Mindestens einer der beiden Tracks liegt nur bei Spotify vor – ohne Audiodatei gibt es keine taktgenauen Marken. Zeitangaben sind Schätzungen aus Tempo und Länge; Mix-Punkte bitte nach Gehör und Waveform in rekordbox setzen."), "why": ""})
     return steps

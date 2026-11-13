@@ -32,6 +32,7 @@ def present(track: dict) -> dict:
     hint = tempo_check(t.get("bpm"), t.get("family")) if t.get("data_source") != "von Hand korrigiert" else None
     t["bpm_hint"] = hint
     t["estimated"] = (t.get("data_source") or "").startswith("Vorhörclip")
+    t["strip"] = cue_engine.strip(track)
     t["incomplete"] = importer.incomplete(track) if "status" in track and "genres" in track else False
     if an:
         t["intro_bars"], t["outro_bars"] = compat.section_bars(track, "intro"), compat.section_bars(track, "outro")

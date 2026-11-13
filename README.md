@@ -173,21 +173,32 @@ Der rekordbox-Export schreibt Hot Cues und Loops in die XML, alle Phasen zusätz
 Memory Cues. Die Phasen-Erkennung arbeitet über Energie- und Bassverlauf je Takt; bei Tracks ohne klare
 Struktur bitte in rekordbox gegenprüfen.
 
+In der Set-Liste trägt jeder Track einen **Phasen-Streifen** (Intro, Hauptteil, Break, Outro). Bei lokalen
+Dateien stammt er aus der Analyse. Bei reinen Spotify-Tracks gibt es kein Audio zum Auswerten – dort zeigt
+SetTracker ein **geschätztes Raster in 16-Takt-Blöcken** aus Tempo und Länge (gestrichelt, als „geschätzt“
+markiert) und schlägt die Cue-Punkte danach vor. Sobald du die Datei nachlädst, ersetzt die echte Analyse
+die Schätzung.
+
 ## Lernen
 
 Der Bereich **Lernen** funktioniert ohne angeschlossenen Controller:
 
-- **Takte & Phrasen zählen** – mit einem **Track aus deiner Bibliothek** (lokale Datei: gezählt wird über
+- **Takte & Phrasen zählen** – zuerst eine **selbstlaufende Einführung** (ca. 80 Sekunden, langsamer Beat:
+  Schläge, Takte, Phrase, selbst zählen), dann üben mit einem **Track aus deiner Bibliothek** (lokale Datei: gezählt wird über
   sein Beatgrid, mit Sprung „8 Takte vor dem Drop“ und Raster-Korrektur) oder einem Übungs-Beat mit einstellbarem Tempo, Zählfelder und eine Phrasen-Uhr
   (8 Takte = 32 Schläge). In der Übung drückst du die Leertaste auf die Eins einer neuen Phrase und siehst,
   wie genau du getroffen hast. Dazu: ein Vergleich „auf der Eins gestartet / daneben“ und der typische
   Bauplan eines Tracks mit den zugehörigen Pads.
-- **Übergänge** – jede Übergangsart mit Einsatzgebiet, Hörtipps und typischen Fehlern. Der Trainer hat drei
-  Modi: *Anleitung* (Schritte lesen, Regler leuchten), *Üben* (die richtigen Regler am Schema anklicken) und
-  *Ablauf im Takt* (ein Beat läuft, die Schritte werden zum passenden Takt aktiv). Das Diagramm „Was die
-  Regler machen“ zeigt Lautstärke, Bass und Filter über die Takte.
+- **Übergänge** – jede Übergangsart mit Einsatzgebiet, Hörtipps und typischen Fehlern. Der Trainer startet
+  im Modus **Tutorial**: Es läuft von selbst ab – erst die Ansage, dann die sichtbare Bewegung, dann der
+  Grund. Die Ansicht fährt auf die betroffenen Regler, Pfeile zeigen die Richtung, die Beschriftung Start-
+  und Zielstellung („12 Uhr → 7 Uhr“). Pause mit der Leertaste, Tempo *Langsam / Normal / Zügig*, jeder
+  Schritt ist anklickbar, auf Wunsch liest die Sprachausgabe des Systems die Schritte vor. Weitere Modi:
+  *Im Takt* (Beat läuft, Schritte werden im passenden Takt aktiv; auch in halbem Tempo), *Selbst probieren*
+  (die richtigen Regler anklicken) und *Nachlesen*.
 - **Tonarten** – das Camelot-Rad zum Anklicken: welche Tonarten zur gewählten passen.
-- **Controller** – jedes Bedienelement des DDJ-FLX4 erklärt. **Tipps** – kurze Regeln fürs Üben und Mixen.
+- **Controller** – ein **Rundgang**, der alle Bedienelemente des DDJ-FLX4 der Reihe nach anfährt und
+  erklärt; jedes lässt sich auch einzeln anklicken. **Tipps** – kurze Regeln fürs Üben und Mixen.
 
 Derselbe Trainer steht bei jedem Übergang im Set zur Verfügung, dort mit den Zeitmarken deiner Tracks.
 Das Controller-Schema ist eine vereinfachte Draufsicht; der Übungs-Beat kommt aus dem Browser-Synthesizer.

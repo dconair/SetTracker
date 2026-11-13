@@ -1,4 +1,10 @@
+import { useEffect, useRef, useState } from "react";
 import { cx } from "./ui";
+
+const FULL: [number, number, number, number] = [0, 0, 1000, 420];
+/** Reglerstellung als Uhrzeit: 0 = 7 Uhr, 0,5 = 12 Uhr, 1 = 5 Uhr. */
+export const clock = (v: number) => { const h = Math.round(7 + v * 10); return `${h > 12 ? h - 12 : h} Uhr`; };
+const faderWord = (v: number) => (v <= 0.02 ? "unten" : v >= 0.98 ? "oben" : `${Math.round(v * 10)}/10`);
 
 /** Schematische Draufsicht des DDJ-FLX4 mit hervorhebbaren und (optional) anklickbaren Bedienelementen. */
 interface Props {
@@ -12,12 +18,59 @@ interface Props {
   onPick?: (id: string) => void;
   /** Reglerstellungen 0…1 je Bedienelement: Drehregler drehen sich (7 bis 5 Uhr), Fader wandern. */
   values?: Record<string, number>;
+  /** Bedienelemente, auf die die Ansicht weich heranfährt; der Rest wird abgedunkelt. */
+  focus?: string[];
+  /** Geplante Bewegung je Regler: zeichnet Richtungspfeil und „von → nach“. */
+  motion?: Record<string, { from: number; to: number }>;
 }
 
-export function Flx4({ active, done = [], wrong, onPick, values }: Props) {
+export function Flx4({ active, done = [], wrong, onPick, values, focus, motion }: Props) {
+  const svg = useRef<SVGSVGElement>(null);
+  const [box, setBox] = useState(FULL);
+  const boxRef = useRef(FULL);
+  const focusKey = (focus ?? []).join(",");
+
+  // Fokus-Zoom: Zielausschnitt aus den Positionen der Bedienelemente, weich angefahren
+  useEffect(() => {
+    const el = svg.current;
+    let target = FULL;
+    if (el && focus && focus.length) {
+      let x0 = 1e9, y0 = 1e9, x1 = -1e9, y1 = -1e9;
+      for (const id of focus) {
+        const g = el.querySelector<SVGGElement>(`g[data-id="${id}"]`);
+        if (!g) continue;
+        const b = g.getBBox();
+        x0 = Math.min(x0, b.x); y0 = Math.min(y0, b.y); x1 = Math.max(x1, b.x + b.width); y1 = Math.max(y1, b.y + b.height);
+      }
+      if (x1 > x0) {
+        const ratio = 1000 / 420;
+        let w = Math.max(x1 - x0 + 150, 430), h = Math.max(y1 - y0 + 110, 430 / ratio);
+        if (w / h < ratio) w = h * ratio; else h = w / ratio;
+        w = Math.min(w, 1000); h = Math.min(h, 420);
+        const cx0 = (x0 + x1) / 2, cy0 = (y0 + y1) / 2;
+        target = [Math.min(Math.max(0, cx0 - w / 2), 1000 - w), Math.min(Math.max(0, cy0 - h / 2), 420 - h), w, h];
+      }
+    }
+    const from = boxRef.current;
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const start = performance.now(), dur = reduced ? 1 : 700;
+    let raf = 0;
+    const step = (now: number) => {
+      const k = Math.min(1, (now - start) / dur), e = k < 0.5 ? 2 * k * k : 1 - Math.pow(-2 * k + 2, 2) / 2;
+      const next = from.map((v, i) => v + (target[i] - v) * e) as typeof FULL;
+      boxRef.current = next;
+      setBox(next);
+      if (k < 1) raf = requestAnimationFrame(step);
+    };
+    raf = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(raf);
+  }, [focusKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  const zoomed = box[2] < 960;
+
   const val = (id: string, fallback: number) => Math.min(1, Math.max(0, values?.[id] ?? fallback));
   const bind = (id: string) => ({
     className: cx("flx", active.includes(id) && "flx-on", done.includes(id) && "flx-done", wrong === id && "flx-wrong", onPick && "flx-pick"),
+    "data-id": id,
     onClick: onPick ? () => onPick(id) : undefined,
   });
 
@@ -25,7 +78,9 @@ export function Flx4({ active, done = [], wrong, onPick, values }: Props) {
     <g {...bind(id)}>
       <circle cx={x} cy={y} r={r} className="flx-shape" />
       <line x1={x} y1={y - r + 3} x2={x} y2={y - 3} className="flx-mark" transform={`rotate(${-150 + val(id, 0.5) * 300} ${x} ${y})`} style={{ transition: "transform 0.12s linear" }} />
+      {[0, 0.25, 0.5, 0.75, 1].map((v) => { const a = ((-150 + v * 300) * Math.PI) / 180; return <line key={v} x1={x + Math.sin(a) * (r + 2)} y1={y - Math.cos(a) * (r + 2)} x2={x + Math.sin(a) * (r + 4.5)} y2={y - Math.cos(a) * (r + 4.5)} className="flx-tick" />; })}
       <text x={x} y={y + r + 11} className="flx-label">{label}</text>
+      {motion?.[id] && <KnobArrow x={x} y={y} r={r + 8} from={motion[id].from} to={motion[id].to} />}
     </g>
   );
   const Btn = ({ id, x, y, w, h = 18, label, round }: { id: string; x: number; y: number; w: number; h?: number; label: string; round?: boolean }) => (
@@ -39,6 +94,10 @@ export function Flx4({ active, done = [], wrong, onPick, values }: Props) {
       <rect x={x - 2} y={y} width={4} height={h} rx={2} className="flx-track" />
       <rect x={x - 11} y={y + (1 - val(id, 0.45)) * (h - 12)} width={22} height={12} rx={3} className="flx-shape" style={{ transition: "y 0.12s linear" }} />
       <text x={x} y={y + h + 13} className="flx-label">{label}</text>
+      {motion?.[id] && (() => {
+        const ya = y + 6 + (1 - motion[id].from) * (h - 12), yb = y + 6 + (1 - motion[id].to) * (h - 12), dir = yb < ya ? -1 : 1;
+        return <g className="flx-arrow"><line x1={x + 17} y1={ya} x2={x + 17} y2={yb - dir * 4} /><path d={`M${x + 13},${yb - dir * 5} L${x + 21},${yb - dir * 5} L${x + 17},${yb} Z`} className="flx-arrowhead" /><text x={x + 24} y={(ya + yb) / 2 + 3} className="flx-value" style={{ textAnchor: "start" }}>{faderWord(motion[id].from)} → {faderWord(motion[id].to)}</text></g>;
+      })()}
     </g>
   );
 
@@ -93,7 +152,8 @@ export function Flx4({ active, done = [], wrong, onPick, values }: Props) {
   );
 
   return (
-    <svg viewBox="0 0 1000 420" className="block w-full" role="img" aria-label="Schema des DDJ-FLX4 mit hervorgehobenen Bedienelementen">
+    <div className="relative">
+    <svg ref={svg} viewBox={box.map((v) => v.toFixed(1)).join(" ")} className={cx("block w-full", zoomed && "flx-zoomed")} style={{ aspectRatio: "1000 / 420" }} role="img" aria-label="Schema des DDJ-FLX4 mit hervorgehobenen Bedienelementen">
       <rect x={2} y={2} width={996} height={416} rx={20} className="flx-body" />
       <Deck n={1} ox={12} />
       <Deck n={2} ox={658} />
@@ -124,7 +184,34 @@ export function Flx4({ active, done = [], wrong, onPick, values }: Props) {
       <g {...bind("crossfader")}>
         <rect x={430} y={390} width={140} height={4} rx={2} className="flx-track" />
         <rect x={430 + val("crossfader", 0.5) * 116} y={381} width={24} height={22} rx={4} className="flx-shape" style={{ transition: "x 0.12s linear" }} />
+        {motion?.crossfader && (() => {
+          const xa = 442 + motion.crossfader.from * 116, xb = 442 + motion.crossfader.to * 116, dir = xb < xa ? -1 : 1;
+          return <g className="flx-arrow"><line x1={xa} y1={374} x2={xb - dir * 4} y2={374} /><path d={`M${xb - dir * 5},370 L${xb - dir * 5},378 L${xb},374 Z`} className="flx-arrowhead" /></g>;
+        })()}
       </g>
     </svg>
+    {zoomed && (
+      <div className="pointer-events-none absolute top-1.5 right-1.5 h-[34px] w-[80px] rounded border border-line bg-bg/80" aria-hidden title="Ausschnitt des Controllers">
+        <div className="absolute rounded-[2px] border border-accent bg-accent-soft" style={{ left: `${box[0] / 10}%`, top: `${box[1] / 4.2}%`, width: `${box[2] / 10}%`, height: `${box[3] / 4.2}%` }} />
+      </div>
+    )}
+    </div>
+  );
+}
+
+/** Bogenpfeil um einen Drehregler von der Start- zur Zielstellung, mit Beschriftung. */
+function KnobArrow({ x, y, r, from, to }: { x: number; y: number; r: number; from: number; to: number }) {
+  const ang = (v: number) => ((-150 + v * 300) * Math.PI) / 180;
+  const pt = (v: number, rr = r) => [x + Math.sin(ang(v)) * rr, y - Math.cos(ang(v)) * rr];
+  const [x0, y0] = pt(from), [x1, y1] = pt(to);
+  const large = Math.abs(to - from) * 300 > 180 ? 1 : 0, sweep = to > from ? 1 : 0;
+  const back = to + (from > to ? 0.035 : -0.035);
+  const [bx0, by0] = pt(back, r - 3.5), [bx1, by1] = pt(back, r + 3.5);
+  return (
+    <g className="flx-arrow">
+      <path d={`M${x0.toFixed(1)},${y0.toFixed(1)} A${r},${r} 0 ${large} ${sweep} ${x1.toFixed(1)},${y1.toFixed(1)}`} fill="none" />
+      <path d={`M${bx0.toFixed(1)},${by0.toFixed(1)} L${bx1.toFixed(1)},${by1.toFixed(1)} L${x1.toFixed(1)},${y1.toFixed(1)} Z`} className="flx-arrowhead" />
+      <text x={x} y={y - r - 5} className="flx-value">{clock(from)} → {clock(to)}</text>
+    </g>
   );
 }

@@ -1,4 +1,4 @@
-import { CircleDot, Disc3, Gauge, GraduationCap, Hand, Lightbulb, Pause, Play, Shuffle, SlidersHorizontal } from "lucide-react";
+import { CircleDot, Clapperboard, Disc3, Gauge, GraduationCap, Hand, Lightbulb, Pause, Play, RotateCcw, Shuffle, SkipBack, SkipForward, SlidersHorizontal } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { useBeat } from "../beat";
@@ -6,6 +6,7 @@ import { Flx4 } from "../Flx4";
 import { AlignmentDemo, CamelotWheel, PhraseClock, TrackBlueprint } from "../LearnVisuals";
 import { StepTrainer } from "../StepTrainer";
 import { useStore } from "../store";
+import { SPEEDS, usePlayer, type Scene } from "../tutorial";
 import type { Lesson, TrackDetail, WaveData } from "../types";
 import { Waveform } from "../Waveform";
 import { Button, Card, cx, fmtBpm, inputClass, PageHeader, useAction } from "../ui";
@@ -87,6 +88,101 @@ function useTrackClock(detail: TrackDetail | null, onBeat: (i: number) => void) 
   return { playing, start, stop, position, time };
 }
 
+// ------------------------------------------------------------------ Geführte Zähl-Einführung
+const INTRO_BPM = 100;
+const INTRO_STAGES: { title: string; texts: [number, string][] }[] = [
+  { title: "Schläge", texts: [
+    [0, "Hör auf die Bassdrum. Jeder Schlag ist ein Zählschritt: 1 – 2 – 3 – 4, dann wieder von vorn."],
+    [4, "Vier Schläge sind ein Takt. Die Eins ist der erste Schlag – betone sie beim Mitzählen."]] },
+  { title: "Takte", texts: [
+    [0, "Jetzt zählst du die Takte mit: Die Taktnummer ersetzt die Eins. „1-2-3-4, 2-2-3-4, 3-2-3-4 …“"],
+    [6, "Gleich sind 8 Takte voll – danach beginnt es wieder bei 1."]] },
+  { title: "Phrase", texts: [
+    [0, "8 Takte sind eine Phrase. Die Uhr zeigt, wo du gerade bist. Am Phrasenbeginn hörst du ein Becken, und der Basston wechselt."],
+    [6, "Achtung, gleich kommt der Wechsel: 7 … 8 … und Eins!"]] },
+  { title: "Selbst zählen", texts: [
+    [0, "Jetzt ohne Anzeige: Zähl selbst weiter bis „8-2-3-4“. Auf der nächsten Eins würdest du am Controller PLAY drücken."],
+    [6, "Fast da – 7 … 8 …"]] },
+];
+
+/** Läuft von selbst: erklärt in vier Abschnitten à 8 Takten das Zählen, im Takt eines langsamen Übungs-Beats. */
+function CountIntro({ onStart, onPractice }: { onStart: () => void; onPractice: () => void }) {
+  const [beatIndex, setBeatIndex] = useState(-1);
+  const [done, setDone] = useState(false);
+  const base = useRef(0);
+  const total = INTRO_STAGES.length * 32;
+  const beat = useBeat({
+    bpm: INTRO_BPM, phraseBars: 8, phraseSignal: true,
+    onBeat: (i) => {
+      const at = base.current + i;
+      if (at >= total + 4) { beat.stop(); setBeatIndex(-1); setDone(true); } else setBeatIndex(at);
+    },
+  });
+  const start = (stage = 0) => {
+    (document.activeElement as HTMLElement | null)?.blur();
+    onStart();
+    base.current = stage * 32;
+    setDone(false);
+    setBeatIndex(-1);
+    beat.start();
+  };
+  const stop = () => { beat.stop(); setBeatIndex(-1); };
+  const over = beatIndex >= total;                     // die Eins nach der letzten Phrase
+  const stage = beatIndex < 0 ? -1 : Math.min(INTRO_STAGES.length - 1, Math.floor(beatIndex / 32));
+  const bar = beatIndex < 0 ? -1 : Math.floor(beatIndex / 4) % 8;
+  const inBar = beatIndex < 0 ? -1 : beatIndex % 4;
+  const blind = stage === 3 && !over;
+  const text = over ? "Genau jetzt beginnt die neue Phrase – hier drückst du PLAY."
+    : stage < 0 ? "" : [...INTRO_STAGES[stage].texts].reverse().find(([from]) => bar >= from)![1];
+
+  return (
+    <Card className="p-5" data-testid="count-intro">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 font-semibold"><Clapperboard size={17} className="text-accent" /> Einführung: So zählst du</div>
+          <p className="mt-1 text-[13px] text-muted">Läuft von selbst, etwa 80 Sekunden, mit langsamem Übungs-Beat. Einfach zuschauen, zuhören und laut mitzählen.</p>
+        </div>
+        <Button variant="primary" icon={beat.playing ? <Pause size={16} /> : done ? <RotateCcw size={16} /> : <Play size={16} />} onClick={() => (beat.playing ? stop() : start())}>
+          {beat.playing ? "Stopp" : done ? "Nochmal ansehen" : "Einführung abspielen"}
+        </Button>
+      </div>
+      {(beat.playing || done) && (
+        <div className="fade mt-4">
+          <div className="flex gap-1.5">
+            {INTRO_STAGES.map((st, i) => (
+              <button key={st.title} onClick={() => start(i)} className="group flex-1 text-left" title={`Ab „${st.title}“ abspielen`}>
+                <span className="block h-1 overflow-hidden rounded-full bg-line"><span className="block h-full bg-accent transition-[width] duration-300" style={{ width: done || over || stage > i ? "100%" : stage === i ? `${((beatIndex % 32) + 1) / 32 * 100}%` : "0%" }} /></span>
+                <span className={cx("mt-1 block text-[11px] font-semibold tracking-wide uppercase", stage === i && !over ? "text-accent" : "text-faint group-hover:text-muted")}>{i + 1}. {st.title}</span>
+              </button>
+            ))}
+          </div>
+          {done ? (
+            <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl bg-accent-soft px-4 py-3">
+              <span className="flex-1 text-[15px]">Das war's: 4 Schläge = 1 Takt, 8 Takte = 1 Phrase, und auf der Eins der neuen Phrase startest du den nächsten Track. Jetzt du!</span>
+              <Button icon={<Hand size={15} />} onClick={onPractice}>Zur Übung</Button>
+            </div>
+          ) : (
+            <div className="mt-4 grid grid-cols-1 items-center gap-5 md:grid-cols-[minmax(0,1fr)_180px]">
+              <div>
+                <div key={text} className="caption-in min-h-[72px] rounded-xl bg-accent-soft px-4 py-3 text-[15px] leading-relaxed" data-testid="intro-text">{text || "Gleich geht's los …"}</div>
+                <div className="mt-3 flex gap-3" data-testid="intro-count">
+                  {[0, 1, 2, 3].map((b) => (
+                    <div key={`${b}-${beatIndex}`} className={cx("num flex h-20 flex-1 items-center justify-center rounded-xl border text-4xl font-bold",
+                      !blind && inBar === b ? cx("beat-pop border-accent text-accent-fg", b === 0 ? "bg-accent" : "bg-accent/70") : "border-line bg-raised text-faint")}>
+                      {blind ? "?" : b === 0 && stage >= 1 && bar >= 0 ? bar + 1 : b + 1}
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div className={cx("flex justify-center transition-opacity duration-500", stage >= 2 ? "opacity-100" : "opacity-25")}><PhraseClock beatIndex={stage >= 2 ? beatIndex : -1} bars={8} hidden={blind} /></div>
+            </div>
+          )}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function Counting() {
   const { tracks, sets } = useStore();
   const run = useAction();
@@ -104,6 +200,13 @@ function Counting() {
   const useTrack = trackId !== null && detail !== null;
   const beat = useTrack ? real : demo;
   const phraseBeats = PHRASE_BARS * 4;
+  const exercise = useRef<HTMLDivElement>(null);
+  const practice = () => {
+    setTrackId(null);
+    setTaps([]);
+    demo.start();
+    exercise.current?.scrollIntoView({ behavior: "smooth", block: "center" });
+  };
 
   // Nur lokale, fertig analysierte Dateien lassen sich abspielen und zählen
   const playable = useMemo(() => (tracks ?? []).filter((t) => t.path && t.has_analysis), [tracks]);
@@ -170,6 +273,7 @@ function Counting() {
   return (
     <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
       <div className="space-y-5">
+        <CountIntro onStart={() => { demo.stop(); real.stop(); setBeatIndex(-1); }} onPractice={practice} />
         <Card className="p-5">
           <div className="mb-4 flex flex-wrap items-end gap-3 border-b border-line pb-4">
             <div className="min-w-0 flex-1">
@@ -250,7 +354,7 @@ function Counting() {
         </Card>
 
         <Card className="p-5">
-          <div className="flex flex-wrap items-center gap-4">
+          <div ref={exercise} className="flex flex-wrap items-center gap-4">
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2 font-semibold"><Hand size={17} className="text-accent" /> Übung: Triff die Eins der neuen Phrase</div>
               <p className="mt-1 text-[13px] text-muted">Zähl mit und drück die <b className="font-medium text-text">Leertaste</b> (oder den Knopf) genau dann, wenn eine neue Phrase beginnt – der Moment, in dem du am Controller PLAY drücken würdest.</p>
@@ -386,26 +490,71 @@ const CONTROLS: { ids: string[]; name: string; text: string }[] = [
   { ids: ["master"], name: "MASTER LEVEL", text: "Gesamtlautstärke zur Anlage. Einmal passend einstellen und während des Sets in Ruhe lassen." },
 ];
 
+const TOUR: [string, string][] = [
+  ["Decks", "BROWSE und LOAD"], ["Decks", "PLAY/PAUSE"], ["Decks", "CUE"], ["Decks", "Jogwheel"], ["Decks", "TEMPO-Slider"], ["Decks", "BEAT SYNC"],
+  ["Pads & Loops", "Performance-Pads (HOT CUE)"], ["Pads & Loops", "4 BEAT/EXIT"], ["Pads & Loops", "LOOP IN / OUT"], ["Pads & Loops", "CUE/LOOP CALL ◀ ▶"],
+  ["Mixer", "TRIM"], ["Mixer", "EQ: HI / MID / LOW"], ["Mixer", "CFX (Filter)"], ["Mixer", "Kanalfader"], ["Mixer", "Crossfader"], ["Mixer", "Kopfhörer: CUE, MIX, LEVEL"],
+  ["Effekte", "BEAT FX"], ["Effekte", "SMART FADER"], ["Effekte", "SMART CFX"], ["Effekte", "MASTER LEVEL"],
+];
+const TOUR_CHAPTERS = ["Decks", "Pads & Loops", "Mixer", "Effekte"];
+/** Deck-Bedienelemente gibt es links und rechts: Der Rundgang fährt nur das linke Deck an, sonst wäre nichts vergrößert. */
+const tourFocus = (chapter: string, ids: string[]) => {
+  if (chapter === "Mixer" || chapter === "Effekte") return ids;
+  const left = ids.filter((id) => id.endsWith("_1"));
+  return left.length ? left : ids;
+};
+
 function Controller() {
   const [picked, setPicked] = useState(0);
   const byId = useMemo(() => new Map(CONTROLS.flatMap((c, i) => c.ids.map((id) => [id, i] as const))), []);
-  const control = CONTROLS[picked];
+  const scenes = useMemo<Scene[]>(() => TOUR.map(([chapter, name]) => {
+    const c = CONTROLS.find((x) => x.name === name)!;
+    return { chapter, title: c.name, text: c.text, focus: tourFocus(chapter, c.ids), posFrom: 0, posTo: 0, moveMs: 900 };
+  }), []);
+  const tour = usePlayer(scenes);
+  const touring = tour.playing || tour.index > 0 || tour.finished;
+  useEffect(() => { if (touring && tour.scene) setPicked(CONTROLS.findIndex((c) => c.name === tour.scene!.title)); }, [touring, tour.scene]);
+  const choose = (i: number) => { tour.pause(); setPicked(i); };
+  const control = tour.playing && tour.scene ? CONTROLS.find((c) => c.name === tour.scene!.title)! : CONTROLS[picked];
+  const zoom = tour.playing || (touring && tour.scene?.title === control.name);
   return (
     <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
       <div className="min-w-0 space-y-4">
-        <Card className="p-4">
-          <Flx4 active={control.ids} onPick={(id) => byId.has(id) && setPicked(byId.get(id)!)} />
-          <div className="mt-3 rounded-lg bg-accent-soft px-4 py-3">
-            <div className="font-semibold text-accent">{control.name}</div>
-            <div className="mt-0.5 text-[13px] leading-relaxed">{control.text}</div>
+        <Card className="p-4" data-testid="tour">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <Button size="sm" variant="primary" className="min-w-40" icon={tour.playing ? <Pause size={14} /> : tour.finished ? <RotateCcw size={14} /> : <Play size={14} />} onClick={tour.toggle}>
+              {tour.playing ? "Pause" : tour.finished ? "Rundgang wiederholen" : touring ? "Rundgang fortsetzen" : "Rundgang abspielen"}
+            </Button>
+            <Button size="sm" variant="ghost" disabled={!touring || tour.index === 0} onClick={() => tour.go(tour.index - 1, tour.playing)} icon={<SkipBack size={14} />} aria-label="Zurück" />
+            <Button size="sm" variant="ghost" disabled={tour.index >= scenes.length - 1} onClick={() => tour.go(tour.index + 1, tour.playing)} icon={<SkipForward size={14} />} aria-label="Weiter" />
+            <span className="flex items-center gap-1.5 text-[11px] font-semibold tracking-wide uppercase">
+              {TOUR_CHAPTERS.map((c, i) => <span key={c} className="flex items-center gap-1.5">{i > 0 && <span className="text-faint">›</span>}<span className={touring && tour.scene?.chapter === c ? "text-accent" : "text-faint"}>{c}</span></span>)}
+            </span>
+            <span className="ml-auto flex items-center gap-1 rounded-lg bg-bg p-0.5" role="group" aria-label="Tempo">
+              {SPEEDS.map(([v, label]) => <button key={v} onClick={() => tour.setSpeed(v)} aria-pressed={tour.speed === v} className={cx("h-6 rounded-md px-2 text-[11px] font-medium", tour.speed === v ? "bg-raised text-text shadow-sm" : "text-muted hover:text-text")}>{label}</button>)}
+            </span>
           </div>
+          <Flx4 active={zoom ? tour.scene!.focus : control.ids} focus={zoom ? tour.scene!.focus : undefined} onPick={(id) => byId.has(id) && choose(byId.get(id)!)} />
+          <div key={control.name} className="caption-in mt-3 min-h-[84px] rounded-lg bg-accent-soft px-4 py-3">
+            <div className="font-semibold text-accent" data-testid="tour-title">{touring ? `${tour.index + 1} von ${scenes.length} · ` : ""}{control.name}</div>
+            <div className="mt-0.5 text-[15px] leading-relaxed">{control.text}</div>
+          </div>
+          {touring && (
+            <div className="mt-2 flex gap-0.5">
+              {scenes.map((sc, i) => (
+                <button key={sc.title} onClick={() => tour.go(i, tour.playing)} title={sc.title} className="group h-3 flex-1 py-1">
+                  <span className="block h-1 overflow-hidden rounded-full bg-line group-hover:bg-faint"><span className="block h-full rounded-full bg-accent" style={{ width: i < tour.index || tour.finished ? "100%" : i === tour.index ? `${tour.progress * 100}%` : "0%" }} /></span>
+                </button>
+              ))}
+            </div>
+          )}
         </Card>
-        <p className="text-xs text-faint">Das Schema ist eine vereinfachte Draufsicht des DDJ-FLX4. Klick auf ein Bedienelement oder wähl es rechts aus.</p>
+        <p className="text-xs text-faint">Der Rundgang fährt alle Bedienelemente der Reihe nach an und erklärt sie. Das Schema ist eine vereinfachte Draufsicht des DDJ-FLX4 – du kannst auch jederzeit ein Bedienelement anklicken oder rechts auswählen.</p>
       </div>
       <Card className="h-fit max-h-[640px] overflow-y-auto p-2">
         {CONTROLS.map((c, i) => (
-          <button key={c.name} onClick={() => setPicked(i)} aria-pressed={picked === i}
-            className={cx("block w-full rounded-lg px-3 py-2 text-left text-[13px] transition-colors", picked === i ? "bg-accent-soft font-medium text-accent" : "text-text hover:bg-hover")}>
+          <button key={c.name} onClick={() => choose(i)} aria-pressed={control === c}
+            className={cx("block w-full rounded-lg px-3 py-2 text-left text-[13px] transition-colors", control === c ? "bg-accent-soft font-medium text-accent" : "text-text hover:bg-hover")}>
             {c.name}
           </button>
         ))}
@@ -414,7 +563,6 @@ function Controller() {
   );
 }
 
-// ------------------------------------------------------------------ Tipps
 const TIPS: { title: string; items: string[] }[] = [
   { title: "Vor dem ersten Übergang", items: [
     "Beide TRIM-Regler so einstellen, dass die Kanäle gleich laut aussteuern – sonst springt die Lautstärke beim Wechsel.",

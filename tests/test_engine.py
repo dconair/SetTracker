@@ -230,3 +230,41 @@ def test_fixed_sort_orders_and_tempo_plausibility():
     assert tempo_check(248, "House")["suggest"] == 124
     odd = tempo_check(106.56, "Drum & Bass")
     assert odd["suggest"] is None and "160–182" in odd["text"]
+
+
+def test_steps_have_phases_and_parts_matching_the_automation():
+    from settracker.engine import automation
+
+    a = {"title": "A", "artist": "", "bpm": 124.0, "duration": 0, "analysis": None}
+    order = ["Vorbereitung", "Einstieg", "Überblenden", "Abschluss", "Hinweis"]
+    for template in transitions.TEMPLATES:
+        plan = transitions.plan(a, {**a, "title": "B"}, template=template)
+        steps = plan["steps"]
+        assert all(s["phase"] in order and isinstance(s["parts"], list) for s in steps), template
+        assert steps[0]["phase"] == "Vorbereitung" and steps[-1]["phase"] == "Hinweis" and steps[-2]["phase"] == "Abschluss"
+        assert any(s["phase"] == "Einstieg" for s in steps), template
+        # Jede Bewegung der Automation kommt in genau einem Schritt als Teil vor – mit denselben Werten
+        expected = sorted((cid, round(pts[i][1], 3), round(pts[i + 1][1], 3))
+                          for cid, pts in plan["automation"]["controls"].items() if not cid.startswith(("beatfx", "loop4"))
+                          for i in range(len(pts) - 1) if abs(pts[i + 1][1] - pts[i][1]) > 1e-6)
+        got = sorted((p["control"], round(p["from"], 3), round(p["to"], 3)) for s in steps if s["phase"] != "Vorbereitung" for p in s["parts"])
+        assert got == expected, template
+        for s in steps:
+            assert {p["control"] for p in s["parts"]} <= set(s["controls"]), template
+    blend = transitions.plan(a, {**a, "title": "B"}, template="blend")
+    setup = next(s for s in blend["steps"] if s["phase"] == "Vorbereitung" and s["parts"])
+    assert {(p["control"], p["from"]) for p in setup["parts"]} == {("hi_2", 0.5), ("mid_2", 0.5), ("low_2", 0.5)}
+    assert automation.build("blend", 16, 1, 2)["bars"] == 16
+
+
+def test_phase_strip_for_local_and_spotify_tracks(lib):
+    from settracker.engine import cues
+
+    local = cues.strip(lib["Warehouse Jack"])
+    assert not local["estimated"] and [b[0] for b in local["blocks"]] == ["intro", "main", "break", "main", "outro"]
+    assert local["blocks"][0][1] < 0.01 and 0.97 < local["blocks"][-1][2] <= 1 and all(a[2] <= b[1] + 1e-6 for a, b in zip(local["blocks"], local["blocks"][1:]))
+    spotify = {"bpm": 120.0, "duration": 300, "analysis": None}      # 150 Takte -> 9 volle Blöcke + Rest
+    est = cues.phases(spotify)
+    assert all(p["estimated"] and p["kind"] == "est" for p in est) and [p["bar"] for p in est[:3]] == [1, 17, 33]
+    assert est[1]["time"] == 32.0 and cues.strip(spotify)["estimated"] and len(cues.strip(spotify)["blocks"]) == len(est)
+    assert cues.phases({"bpm": None, "duration": 300, "analysis": None}) == [] and cues.strip({"bpm": None, "duration": 0, "analysis": None}) is None

@@ -25,6 +25,7 @@ export interface Track {
   estimated: boolean;
   incomplete: boolean;
   bpm_hint: { suggest: number | null; text: string } | null;
+  strip: { estimated: boolean; blocks: [string, number, number][] } | null;
   intro_bars?: number;
   outro_bars?: number;
 }
@@ -67,7 +68,8 @@ export interface SetInfo { id: number; name: string; count: number; origin: stri
 export interface Suggestion { track: Track; score: number; verdict: Verdict; reasons: string[] }
 
 export interface Cue { pad: number; name: string; time: number; label: string }
-export interface Step { when: string; deck: number | null; text: string; why: string; controls: string[]; bar_from: number | null; bar_to: number | null }
+export interface StepPart { control: string; from: number; to: number; jump: boolean }
+export interface Step { when: string; deck: number | null; text: string; why: string; controls: string[]; bar_from: number | null; bar_to: number | null; phase: string; parts: StepPart[] }
 export type Curve = [number, number][];
 export interface Automation {
   bars: number;
@@ -159,7 +161,7 @@ export interface Status {
 export interface SpotifyPlaylist { id: string; name: string; count: number | null; image: string | null; owner: string | null }
 
 export interface TrackCue { pad: number; letter: string; name: string; kind: "cue" | "loop"; time: number; end?: number; bars?: number; label: string; bar: number; estimated: boolean }
-export interface Phase { name: string; kind: string; time: number; end: number; label: string; bar: number; bars: number }
+export interface Phase { name: string; kind: string; time: number; end: number; label: string; bar: number; bars: number; estimated?: boolean }
 export interface Analysis { bpm: number; first_downbeat: number; bar_len: number; n_bars: number; sections: Section[] }
 export interface TrackDetail extends Track { cues: TrackCue[]; phases: Phase[]; analysis: Analysis | null }
 export interface SpotifyCheck { ok: boolean; redirect_uri: string; steps: { name: string; ok: boolean; detail: string; hint?: string }[] }

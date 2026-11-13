@@ -162,8 +162,8 @@ export function PageHeader({ title, subtitle, children }: { title: ReactNode; su
   );
 }
 
-export function Card({ className, children }: { className?: string; children: ReactNode }) {
-  return <div className={cx("rounded-xl border border-line bg-surface", className)}>{children}</div>;
+export function Card({ className, children, ...rest }: { className?: string; children: ReactNode; "data-testid"?: string }) {
+  return <div {...rest} className={cx("rounded-xl border border-line bg-surface", className)}>{children}</div>;
 }
 
 export function Modal({ title, onClose, children, wide, footer }: { title: ReactNode; onClose: () => void; children: ReactNode; wide?: boolean; footer?: ReactNode }) {
@@ -338,5 +338,24 @@ export function DialogProvider({ children }: { children: ReactNode }) {
         </Modal>
       )}
     </DialogContext.Provider>
+  );
+}
+
+const PHASE_COLOR: Record<string, string> = { intro: "#3ecf8e", main: "#ffa23e", break: "#b48cff", outro: "#f2617a" };
+const PHASE_NAME: Record<string, string> = { intro: "Intro", main: "Hauptteil/Drop", break: "Break", outro: "Outro" };
+
+/**
+ * Phasen eines Tracks als schmaler Streifen. Bei Dateien die erkannten Abschnitte in Farbe;
+ * bei reinen Spotify-Tracks ein grau gestreiftes 16-Takt-Raster (geschätzt, nicht erkannt).
+ */
+export function PhaseStrip({ strip, className }: { strip: Track["strip"]; className?: string }) {
+  if (!strip) return null;
+  return (
+    <span className={cx("flex h-1.5 w-full gap-px overflow-hidden rounded-full", className)}
+      title={strip.estimated ? "Geschätztes Raster: Blöcke von 16 Takten ab Trackbeginn. Ohne Audiodatei lassen sich Intro, Drop und Break nicht erkennen." : "Erkannte Phasen: " + strip.blocks.map((b) => PHASE_NAME[b[0]]).join(" · ")}>
+      {strip.blocks.map(([kind, start, end], i) => (
+        <span key={i} style={{ width: `${(end - start) * 100}%`, background: strip.estimated ? (i % 2 ? "var(--line)" : "var(--faint)") : PHASE_COLOR[kind], opacity: strip.estimated ? 0.7 : 0.85 }} />
+      ))}
+    </span>
   );
 }

@@ -6,7 +6,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api, openExternal } from "../api";
 import { useStore } from "../store";
 import type { SetView, Suggestion, Track, Transition } from "../types";
-import { Button, Card, cx, Empty, fmtBpm, fmtLong, IconButton, KeyBadge, Menu, MenuItem, Meter, Modal, PageHeader, ScoreBadge, Select, changesText, SourceTag, TrackTitle, useAction, useDialog, useToast, verdictColor } from "../ui";
+import { Button, Card, cx, Empty, fmtBpm, fmtLong, IconButton, KeyBadge, Menu, MenuItem, Meter, Modal, PageHeader, ScoreBadge, Select, changesText, PhaseStrip, SourceTag, TrackTitle, useAction, useDialog, useToast, verdictColor } from "../ui";
 import { FolderDialog, SpotifyLogo } from "./Library";
 import { TransitionPanel } from "./TransitionPanel";
 
@@ -279,9 +279,12 @@ function SetRow({ track, index, pinned, onPin, onRemove }: { track: Track; index
         <GripVertical size={16} />
       </button>
       <span className="num w-5 text-center text-[13px] font-semibold text-muted">{index + 1}</span>
-      <div className="flex min-w-0 flex-1 items-center gap-2.5">
-        <TrackTitle track={track} onOpen={() => openTrack(track.id)} />
-        <SourceTag track={track} />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2.5">
+          <TrackTitle track={track} onOpen={() => openTrack(track.id)} />
+          <SourceTag track={track} />
+        </div>
+        <PhaseStrip strip={track.strip} className="mt-1.5 max-w-md" />
       </div>
       <span className="hidden w-28 truncate text-[13px] text-muted md:block">{track.family || "–"}</span>
       <span className="num w-14 text-right font-mono text-[13px]">{fmtBpm(track.bpm)}</span>

@@ -1,18 +1,22 @@
-import { BookOpen, ChevronLeft, ChevronRight, Headphones, Lightbulb, MousePointerClick, Pause, Play, RotateCcw, Timer } from "lucide-react";
+import { BookOpen, ChevronLeft, ChevronRight, Clapperboard, Headphones, Lightbulb, MousePointerClick, Pause, Play, RotateCcw, SkipBack, SkipForward, Timer, Volume2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useBeat } from "./beat";
 import { Flx4 } from "./Flx4";
 import { controlValues, MixLanes } from "./LearnVisuals";
 import { MixPreview, type PreviewConfig } from "./mixPreview";
+import { scenesFromSteps, sceneState, SPEEDS, usePlayer } from "./tutorial";
 import type { Automation, Step } from "./types";
 import { Button, cx } from "./ui";
 
-type Mode = "read" | "practice" | "run";
+type Mode = "tutorial" | "run" | "practice" | "read";
 const MODES: [Mode, string, React.ReactNode][] = [
-  ["read", "Anleitung", <BookOpen size={14} key="r" />],
-  ["practice", "Üben", <MousePointerClick size={14} key="p" />],
-  ["run", "Ablauf im Takt", <Timer size={14} key="t" />],
+  ["tutorial", "Tutorial", <Clapperboard size={14} key="v" />],
+  ["run", "Im Takt", <Timer size={14} key="t" />],
+  ["practice", "Selbst probieren", <MousePointerClick size={14} key="p" />],
+  ["read", "Nachlesen", <BookOpen size={14} key="r" />],
 ];
+const CHAPTERS = ["Vorbereitung", "Einstieg", "Überblenden", "Abschluss"];
+const canSpeak = () => typeof window !== "undefined" && "speechSynthesis" in window && window.speechSynthesis.getVoices().some((v) => v.lang.toLowerCase().startsWith("de"));
 
 /** Taktposition, deren Reglerstellung zu einem Schritt gezeigt wird: der Zustand nach dem Schritt. */
 function stepPos(step: Step | undefined): number {
@@ -41,7 +45,12 @@ interface Props {
  * Ablauf im Takt: Zeiger und Regler laufen mit – mit den eigenen Dateien hörbar, sonst mit Übungs-Beat.
  */
 export function StepTrainer({ steps, bpm, automation, preview, from, to, onPos }: Props) {
-  const [mode, setMode] = useState<Mode>("read");
+  const [mode, setMode] = useState<Mode>("tutorial");
+  const [speak, setSpeak] = useState(false);
+  const [voice, setVoice] = useState(false);
+  const scenes = useMemo(() => scenesFromSteps(steps, automation), [steps, automation]);
+  const tut = usePlayer(scenes);
+  const tutNow = useMemo(() => sceneState(tut.scene, tut.t, automation), [tut.scene, tut.t, automation]);
   const [index, setIndex] = useState(0);
   const [found, setFound] = useState<string[]>([]);
   const [wrong, setWrong] = useState<string | null>(null);
@@ -55,8 +64,9 @@ export function StepTrainer({ steps, bpm, automation, preview, from, to, onPos }
 
   const n = automation.bars;
   const lastBar = useMemo(() => Math.max(n, ...steps.map((s) => s.bar_to ?? 0)), [steps, n]);
+  const [half, setHalf] = useState(false);
   const beat = useBeat({
-    bpm,
+    bpm: half ? bpm / 2 : bpm,
     phraseBars: 8,
     onBeat: (i) => {
       setRunPos((i - 4) / 4);                 // ein Takt Einzählen
@@ -64,7 +74,43 @@ export function StepTrainer({ steps, bpm, automation, preview, from, to, onPos }
     },
   });
 
-  const stopRun = () => { beat.stop(); player.current?.stop(); player.current = null; };
+  const stopRun = () => { beat.stop(); player.current?.stop(); player.current = null; tut.pause(); window.speechSynthesis?.cancel(); };
+
+  // Deutsche Stimme vorhanden? (Die Liste lädt in manchen Browsern erst nachträglich.)
+  useEffect(() => {
+    const check = () => setVoice(canSpeak());
+    check();
+    window.speechSynthesis?.addEventListener?.("voiceschanged", check);
+    return () => window.speechSynthesis?.removeEventListener?.("voiceschanged", check);
+  }, []);
+  // Vorlesen: Text der Szene sprechen, sobald sie beginnt
+  useEffect(() => {
+    if (mode !== "tutorial" || !speak || !tut.playing || !tut.scene) return;
+    window.speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(tut.scene.text);
+    u.lang = "de-DE";
+    u.rate = Math.min(1.25, 0.95 * tut.speed);
+    window.speechSynthesis.speak(u);
+  }, [mode, speak, tut.playing, tut.index]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Leertaste: Tutorial anhalten/fortsetzen
+  useEffect(() => {
+    if (mode !== "tutorial") return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code !== "Space" || e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+      e.preventDefault();
+      (document.activeElement as HTMLElement | null)?.blur();
+      tut.toggle();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  });
+  // Beim Start das Tutorial ins Bild holen – der Controller soll ganz zu sehen sein
+  const card = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (mode !== "tutorial" || !tut.playing) return;
+    const r = card.current?.getBoundingClientRect();
+    if (r && (r.top < 0 || r.bottom > window.innerHeight)) card.current?.scrollIntoView({ block: r.height > window.innerHeight ? "start" : "center", behavior: "smooth" });
+  }, [mode, tut.playing]);
   const reset = (next: Mode = mode) => {
     stopRun();
     setMode(next);
@@ -76,7 +122,7 @@ export function StepTrainer({ steps, bpm, automation, preview, from, to, onPos }
     setFinished(false);
     setRunPos(null);
   };
-  useEffect(() => reset("read"), [steps]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => reset("tutorial"), [steps]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => stopRun, []);            // eslint-disable-line react-hooks/exhaustive-deps
 
   const step = steps[index];
@@ -113,24 +159,28 @@ export function StepTrainer({ steps, bpm, automation, preview, from, to, onPos }
   };
 
   // Welche Taktposition zeigen Regler und Zeiger gerade?
-  const pos = mode === "run" ? runPos : mode === "practice" ? stepPos(steps[index - 1]) : stepPos(step);
-  useEffect(() => { onPos?.(mode === "run" ? runPos : mode === "read" ? stepPos(step) : null); }, [mode, runPos, step]); // eslint-disable-line react-hooks/exhaustive-deps
-  const values = useMemo(() => controlValues(automation, pos ?? -0.5), [automation, pos]);
+  const pos = mode === "tutorial" ? tutNow.pos : mode === "run" ? runPos : mode === "practice" ? stepPos(steps[index - 1]) : stepPos(step);
+  const shownPos = mode === "tutorial" ? (tutNow.pos >= -0.4 ? tutNow.pos : null) : mode === "run" ? runPos : mode === "read" ? stepPos(step) : null;
+  useEffect(() => { onPos?.(shownPos); }, [shownPos]); // eslint-disable-line react-hooks/exhaustive-deps
+  const plain = useMemo(() => controlValues(automation, pos ?? -0.5), [automation, pos]);
+  const values = mode === "tutorial" ? tutNow.values : plain;
 
   const bar = runPos === null ? null : Math.floor(runPos) + 1;       // Taktnummer (1 = erster Takt des Übergangs)
   const activeInRun = steps.map((s, i) => ({ s, i })).filter(({ s }) => bar !== null && s.bar_from !== null && bar >= s.bar_from && bar <= (s.bar_to ?? s.bar_from));
   const runIndex = activeInRun.length ? activeInRun[activeInRun.length - 1].i : -1;
   const active =
-    mode === "read" ? step?.controls ?? []
+    mode === "tutorial" ? tut.scene?.focus ?? []
+    : mode === "read" ? step?.controls ?? []
     : mode === "practice" ? (hint ? (step?.controls ?? []).filter((c) => !found.includes(c)) : [])
     : activeInRun.flatMap(({ s }) => s.controls);
-  const currentIndex = mode === "run" ? runIndex : index;
+  const currentIndex = mode === "tutorial" ? tut.scene?.stepIndex ?? -1 : mode === "run" ? runIndex : index;
   const beatInBar = runPos === null ? -1 : Math.floor(((runPos % 1) + 1) % 1 * 4);
-  const range: [number, number] | null = mode !== "run" && step?.bar_from ? [step.bar_from, Math.min(step.bar_to ?? step.bar_from, n + 1)] : null;
+  const rangeStep = mode === "tutorial" ? steps[tut.scene?.stepIndex ?? -1] : mode !== "run" ? step : undefined;
+  const range: [number, number] | null = rangeStep?.bar_from ? [rangeStep.bar_from, Math.min(rangeStep.bar_to ?? rangeStep.bar_from, n + 1)] : null;
 
   return (
     <div>
-      <div className="rounded-xl border border-line bg-surface p-3">
+      <div ref={card} className="rounded-xl border border-line bg-surface p-3">
         <div className="mb-2 flex gap-1 rounded-lg bg-bg p-1" role="tablist">
           {MODES.map(([key, label, icon]) => (
             <button key={key} role="tab" aria-selected={mode === key} onClick={() => reset(key)}
@@ -139,8 +189,63 @@ export function StepTrainer({ steps, bpm, automation, preview, from, to, onPos }
             </button>
           ))}
         </div>
-        <Flx4 active={active} values={values} done={mode === "practice" ? found : []} wrong={wrong} onPick={mode === "practice" && !finished ? pick : undefined} />
-        <p className="mt-1 text-center text-[11px] text-faint">Die Regler im Schema stehen so, wie sie {mode === "run" ? "im aktuellen Takt" : "nach diesem Schritt"} stehen sollen. Leuchtende Regler werden gerade bewegt.</p>
+        <Flx4 active={active} values={values} done={mode === "practice" ? found : []} wrong={wrong} onPick={mode === "practice" && !finished ? pick : undefined}
+          focus={mode === "tutorial" && (tut.playing || tut.index > 0 || tut.finished) ? tut.scene?.focus : undefined}
+          motion={mode === "tutorial" && tut.phase !== "outro" ? tut.scene?.motion : undefined} />
+        {mode !== "tutorial" && <p className="mt-1 text-center text-[11px] text-faint">Die Regler im Schema stehen so, wie sie {mode === "run" ? "im aktuellen Takt" : "nach diesem Schritt"} stehen sollen. Leuchtende Regler werden gerade bewegt.</p>}
+
+        {mode === "tutorial" && (
+          <div className="mt-3" data-testid="tutorial">
+            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold tracking-wide uppercase">
+              {CHAPTERS.map((c, i) => (
+                <span key={c} className="flex items-center gap-1.5">
+                  {i > 0 && <span className="text-faint">›</span>}
+                  <span className={tut.scene?.chapter === c ? "text-accent" : "text-faint"}>{c}</span>
+                </span>
+              ))}
+            </div>
+            <div key={tut.index} className="caption-in min-h-[92px] rounded-xl bg-accent-soft px-4 py-3">
+              <div className="text-xs font-semibold text-accent" data-testid="scene-title">Schritt {tut.index + 1} von {scenes.length} · {tut.scene?.title}</div>
+              <div className="mt-1 text-[15px] leading-relaxed" data-testid="scene-text">{tut.scene?.text}</div>
+              {tut.scene?.why && <div className={cx("mt-1.5 text-[13px] text-muted transition-opacity duration-500", tut.phase === "outro" || !tut.playing ? "opacity-100" : "opacity-0")}><b className="font-semibold text-text">Warum:</b> {tut.scene.why}</div>}
+            </div>
+            <div className="mt-2 flex gap-0.5" role="group" aria-label="Schritte">
+              {scenes.map((sc, i) => (
+                <button key={i} onClick={() => tut.go(i, tut.playing)} title={`${i + 1}. ${sc.title}`} className="group h-3 flex-1 py-1">
+                  <span className="block h-1 overflow-hidden rounded-full bg-line group-hover:bg-faint">
+                    <span className="block h-full rounded-full bg-accent" style={{ width: i < tut.index || tut.finished ? "100%" : i === tut.index ? `${tut.progress * 100}%` : "0%" }} />
+                  </span>
+                </button>
+              ))}
+            </div>
+            <div className="mt-1.5 flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="primary" className="min-w-36" icon={tut.playing ? <Pause size={14} /> : tut.finished ? <RotateCcw size={14} /> : <Play size={14} />} onClick={tut.toggle}>
+                {tut.playing ? "Pause" : tut.finished ? "Nochmal ansehen" : tut.index === 0 && tut.progress === 0 ? "Tutorial abspielen" : "Weiter abspielen"}
+              </Button>
+              <Button size="sm" variant="ghost" disabled={tut.index === 0} onClick={() => tut.go(tut.index - 1, tut.playing)} icon={<SkipBack size={14} />} aria-label="Einen Schritt zurück" />
+              <Button size="sm" variant="ghost" disabled={tut.index >= scenes.length - 1} onClick={() => tut.go(tut.index + 1, tut.playing)} icon={<SkipForward size={14} />} aria-label="Einen Schritt weiter" />
+              <span className="ml-auto flex items-center gap-1 rounded-lg bg-bg p-0.5" role="group" aria-label="Tempo">
+                {SPEEDS.map(([v, label]) => (
+                  <button key={v} onClick={() => tut.setSpeed(v)} aria-pressed={tut.speed === v} className={cx("h-6 rounded-md px-2 text-[11px] font-medium", tut.speed === v ? "bg-raised text-text shadow-sm" : "text-muted hover:text-text")}>{label}</button>
+                ))}
+              </span>
+              {voice && (
+                <button onClick={() => { if (speak) window.speechSynthesis.cancel(); setSpeak(!speak); }} aria-pressed={speak} title="Schritt-Texte vorlesen"
+                  className={cx("inline-flex h-7 items-center gap-1.5 rounded-lg border px-2 text-[11px] font-medium", speak ? "border-accent bg-accent-soft text-accent" : "border-line text-muted hover:text-text")}>
+                  <Volume2 size={13} />Vorlesen
+                </button>
+              )}
+            </div>
+            {tut.finished && (
+              <div className="fade mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-line px-3 py-2 text-[13px]">
+                <span className="flex-1">Das war der ganze Übergang. Jetzt selbst versuchen?</span>
+                <Button size="sm" icon={<MousePointerClick size={14} />} onClick={() => reset("practice")}>Selbst probieren</Button>
+                <Button size="sm" icon={<Timer size={14} />} onClick={() => reset("run")}>{preview ? "Anhören im Takt" : "Im Takt ablaufen lassen"}</Button>
+              </div>
+            )}
+            <p className="mt-1.5 text-[11px] text-faint">Läuft von selbst: erst die Ansage, dann die Bewegung, dann der Grund. Leertaste = Pause. Pfeile zeigen die Richtung, die Beschriftung Start- und Zielstellung.</p>
+          </div>
+        )}
 
         {mode === "read" && (
           <div className="mt-2">
@@ -183,10 +288,11 @@ export function StepTrainer({ steps, bpm, automation, preview, from, to, onPos }
               <Button size="sm" variant="primary" icon={running ? <Pause size={14} /> : <Play size={14} />} onClick={() => { if (running) { stopRun(); setRunPos(null); } else startRun(); }}>
                 {running ? "Stopp" : preview ? "Übergang anhören" : "Start"}
               </Button>
+              {!preview && <label className="flex cursor-pointer items-center gap-1.5 text-xs text-muted"><input type="checkbox" checked={half} disabled={running} onChange={(e) => setHalf(e.target.checked)} className="accent-(--accent)" />Halbes Tempo</label>}
               <div className="min-w-0 flex-1 text-[13px]">
                 {runPos === null ? <span className="text-muted">{preview
                   ? <><Headphones size={13} className="mr-1 inline text-accent" />Spielt beide Tracks ab 4 Takte vor dem Mix-Punkt und bewegt EQ, Filter und Fader wie geplant.</>
-                  : `Ein Übungs-Beat mit ${Math.round(bpm)} BPM läuft, Regler und Zeiger bewegen sich im Takt. Erst ein Takt Einzählen.`}</span>
+                  : `Ein Übungs-Beat mit ${Math.round(half ? bpm / 2 : bpm)} BPM läuft, Regler und Zeiger bewegen sich im Takt. Erst ein Takt Einzählen.`}</span>
                   : runPos < 0 ? <span className="font-semibold text-muted">{preview ? `Noch ${Math.ceil(-runPos)} Takt${Math.ceil(-runPos) === 1 ? "" : "e"} bis zum Mix-Punkt …` : "Einzählen …"}</span>
                   : runPos >= n ? <span className="font-semibold text-good">Übergang durch – Track B läuft allein.</span>
                   : <span className="font-semibold text-accent">Takt {bar} von {n}</span>}
@@ -215,7 +321,7 @@ export function StepTrainer({ steps, bpm, automation, preview, from, to, onPos }
       <div className="mt-3 rounded-xl border border-line bg-surface p-4">
         <div className="mb-2 flex items-baseline justify-between gap-3">
           <h4 className="text-[13px] font-semibold">Regler über die Takte</h4>
-          <span className="text-xs text-faint">{mode === "run" ? "Der Zeiger läuft mit" : "Hinterlegt: Takte des aktuellen Schritts"}</span>
+          <span className="text-xs text-faint">{mode === "run" || mode === "tutorial" ? "Der Zeiger läuft mit" : "Hinterlegt: Takte des aktuellen Schritts"}</span>
         </div>
         <MixLanes automation={automation} from={from ?? -1} to={to ?? n + 1} pos={pos} range={range} />
       </div>
@@ -226,8 +332,8 @@ export function StepTrainer({ steps, bpm, automation, preview, from, to, onPos }
           const past = mode === "practice" ? i < index || finished : mode === "run" && bar !== null && s.bar_to !== null && bar > s.bar_to;
           return (
             <li key={i}>
-              <button onClick={() => mode === "read" && go(i)} disabled={mode !== "read"} aria-current={current ? "step" : undefined}
-                className={cx("flex w-full gap-3 border-b border-line/70 px-4 py-3 text-left transition-colors disabled:cursor-default", current ? "bg-accent-soft" : mode === "read" && "hover:bg-hover", past && "opacity-55")}>
+              <button onClick={() => (mode === "read" ? go(i) : mode === "tutorial" ? tut.go(scenes.findIndex((sc) => sc.stepIndex === i), tut.playing) : undefined)} disabled={mode !== "read" && mode !== "tutorial"} aria-current={current ? "step" : undefined}
+                className={cx("flex w-full gap-3 border-b border-line/70 px-4 py-3 text-left transition-colors disabled:cursor-default", current ? "bg-accent-soft" : (mode === "read" || mode === "tutorial") && "hover:bg-hover", past && "opacity-55")}>
                 <span className={cx("num mt-px flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px] font-semibold", current ? "bg-accent text-accent-fg" : "bg-hover text-muted")}>{i + 1}</span>
                 <span className="min-w-0 flex-1">
                   <span className="mb-0.5 flex items-center gap-2 text-xs">

@@ -34,7 +34,7 @@ def phases(track: dict) -> list[dict]:
     """Beschriftete Abschnitte (Intro, Drop, Break, …) mit Nummerierung bei Wiederholung."""
     an = track.get("analysis")
     if not an:
-        return []
+        return _estimated_phases(track)
     out, counts = [], {"main": 0, "break": 0}
     for sec in an["sections"]:
         name = {"intro": "INTRO", "outro": "OUTRO", "main": "DROP", "break": "BREAK"}[sec["kind"]]
@@ -107,3 +107,34 @@ def set_cues(track: dict, plan_in: dict | None, plan_out: dict | None) -> list[d
             bar = int(round((c["time"] - first) / bar_len)) if bar_len else 0
             by_pad[c["pad"]] = _cue(c["pad"], c["name"], c["time"], bar)
     return [by_pad[p] for p in sorted(by_pad)]
+
+
+def _estimated_phases(track: dict) -> list[dict]:
+    """Ohne Audiodatei: Blöcke von 16 Takten ab Trackbeginn, gerechnet aus Tempo und Länge.
+
+    Das ist ein Raster zur Orientierung, keine Erkennung – wo Intro, Drop oder Break wirklich
+    liegen, lässt sich ohne Audio nicht feststellen. Jeder Block ist als geschätzt markiert.
+    """
+    bpm, duration = track.get("bpm"), track.get("duration") or 0
+    if not bpm or duration < 60:
+        return []
+    bar_len = 4 * 60.0 / bpm
+    total = int(duration / bar_len)
+    out = []
+    for n, start in enumerate(range(0, total, 16)):
+        bars = min(16, total - start)
+        if bars < 4:
+            break
+        out.append({"name": f"Takt {start + 1}", "kind": "est", "time": round(start * bar_len, 3), "end": round((start + bars) * bar_len, 3),
+                    "label": _fmt(start * bar_len), "bar": start + 1, "bars": bars, "estimated": True, "index": n})
+    return out
+
+
+def strip(track: dict) -> dict | None:
+    """Kompakter Phasen-Streifen für Listen: [[Art, Beginn, Ende]] als Anteile der Tracklänge."""
+    duration = track.get("duration") or 0
+    blocks = phases(track)
+    if not blocks or not duration:
+        return None
+    return {"estimated": bool(blocks[0].get("estimated")),
+            "blocks": [[b["kind"], round(max(0, b["time"]) / duration, 4), round(min(duration, b["end"]) / duration, 4)] for b in blocks]}
