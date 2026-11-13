@@ -14,12 +14,14 @@ interface Props {
   highlight?: { start: number; end: number };
   showSections?: boolean;
   showBars?: boolean;
+  /** Abspielposition in Sekunden – wird als Zeiger gezeichnet. */
+  cursor?: number | null;
 }
 
 const SECTION_TINT: Record<string, number> = { intro: 0.1, outro: 0.1, break: 0.06, main: 0 };
 
 /** Dreiband-Waveform (Bass blau, Mitten orange, Höhen hell) mit Abschnitten und Marken. */
-export function Waveform({ data, start = 0, end, height = 96, markers = [], highlight, showSections = true, showBars }: Props) {
+export function Waveform({ data, start = 0, end, height = 96, markers = [], highlight, showSections = true, showBars, cursor }: Props) {
   const ref = useRef<HTMLCanvasElement>(null);
   const to = end ?? data.duration;
 
@@ -111,6 +113,10 @@ export function Waveform({ data, start = 0, end, height = 96, markers = [], high
         ctx.fillStyle = "#0a0c10";
         ctx.fillText(m.label, lx + 5, height - 6);
       }
+      if (cursor !== null && cursor !== undefined && x(cursor) >= 0 && x(cursor) <= width) {
+        ctx.fillStyle = color("--text");
+        ctx.fillRect(x(cursor) - 1, 0, 2, height);
+      }
     };
     draw();
     const observer = new ResizeObserver(draw);
@@ -121,7 +127,7 @@ export function Waveform({ data, start = 0, end, height = 96, markers = [], high
       observer.disconnect();
       themeObserver.disconnect();
     };
-  }, [data, start, to, height, markers, highlight, showSections, showBars]);
+  }, [data, start, to, height, markers, highlight, showSections, showBars, cursor]);
 
   return <canvas ref={ref} className="block w-full" style={{ height }} />;
 }

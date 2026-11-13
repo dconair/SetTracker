@@ -14,6 +14,7 @@ export function TransitionPanel({ setId, index, total, onClose, onNavigate }: { 
   const { status } = useStore();
   const [detail, setDetail] = useState<TransitionDetail | null>(null);
   const [waves, setWaves] = useState<{ a: WaveData | null; b: WaveData | null }>({ a: null, b: null });
+  const [pos, setPos] = useState<number | null>(null);
 
   useEffect(() => {
     setDetail(null);
@@ -74,13 +75,13 @@ export function TransitionPanel({ setId, index, total, onClose, onNavigate }: { 
             </div>
 
             <section className="rounded-xl border border-line bg-surface">
-              <DeckWave deck={plan.deck_a} track={detail.a} wave={waves.a} plan={plan} side="a" other={waves.b} />
+              <DeckWave deck={plan.deck_a} track={detail.a} wave={waves.a} plan={plan} side="a" other={waves.b} pos={pos} />
               <div className="border-t border-line" />
-              <DeckWave deck={plan.deck_b} track={detail.b} wave={waves.b} plan={plan} side="b" other={waves.a} />
+              <DeckWave deck={plan.deck_b} track={detail.b} wave={waves.b} plan={plan} side="b" other={waves.a} pos={pos} />
               {plan.precise && (
                 <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-line px-4 py-2.5 text-[11px] text-muted">
                   <Legend color="var(--wave-low)" label="Bass" /><Legend color="var(--wave-mid)" label="Mitten" /><Legend color="var(--wave-high)" label="Höhen" />
-                  <span className="ml-auto">Farbig hinterlegt: Überblend-Bereich ({plan.bars} Takte) · Linien alle 4 Takte</span>
+                  <span className="ml-auto">Hinterlegt: Übergang ({plan.automation.bars} Takte) · Linien alle 4 Takte · gleiche Taktachse wie die Reglerspuren unten</span>
                 </div>
               )}
             </section>
@@ -103,7 +104,12 @@ export function TransitionPanel({ setId, index, total, onClose, onNavigate }: { 
                 <h3 className="font-semibold">Schritt für Schritt am DDJ-FLX4</h3>
                 <Button size="sm" variant="ghost" onClick={() => openExternal(`/api/sets/${setId}/export/cheatsheet.html`, status?.desktop).catch(() => {})}>Spickzettel öffnen</Button>
               </div>
-              <StepTrainer steps={plan.steps} bpm={plan.tempo?.target_bpm ?? detail.a.bpm ?? 124} template={plan.template} bars={plan.bars} />
+              <StepTrainer steps={plan.steps} bpm={detail.a.bpm ?? 124} automation={plan.automation} from={VIEW_FROM} to={plan.automation.bars + VIEW_TAIL} onPos={setPos}
+                preview={plan.precise && plan.mix_out && plan.mix_in && plan.bar_len_a && plan.bar_len_b && detail.a.path && detail.b.path ? {
+                  a: { id: detail.a.id, start: plan.mix_out.time, barLen: plan.bar_len_a, deck: plan.deck_a },
+                  b: { id: detail.b.id, start: plan.mix_in.time, barLen: plan.bar_len_b, deck: plan.deck_b, rate: plan.bar_len_b / plan.bar_len_a },
+                  bpm: detail.a.bpm ?? 124,
+                } : null} />
             </section>
           </div>
         )}
@@ -117,16 +123,20 @@ function Legend({ color, label }: { color: string; label: string }) {
 }
 
 /** Eine Deck-Zeile: beide Waveforms teilen dieselbe Takt-Achse, der Mix-Punkt liegt bei beiden an derselben Stelle. */
-function DeckWave({ deck, track, wave, plan, side, other }: { deck: number; track: Track; wave: WaveData | null; plan: Plan; side: "a" | "b"; other: WaveData | null }) {
+// Sichtbarer Taktbereich um den Übergang – identisch für beide Waveforms und die Reglerspuren.
+const VIEW_FROM = -8;
+const VIEW_TAIL = 8;
+
+function DeckWave({ deck, track, wave, plan, side, other, pos }: { deck: number; track: Track; wave: WaveData | null; plan: Plan; side: "a" | "b"; other: WaveData | null; pos: number | null }) {
   const view = useMemo(() => {
     if (!wave || !wave.bar_len || !plan.mix_out || !plan.mix_in) return null;
-    const lead = 8;                              // Takte vor dem Mix-Punkt
-    const span = lead + Math.max(plan.bars, 4) + 12;
-    const anchor = side === "a" ? plan.mix_out.time : plan.mix_in.time;
-    const start = anchor - lead * wave.bar_len;
+    const n = plan.automation.bars;
+    // Takt 0 der gemeinsamen Achse: bei A der Mix-Out, bei B der Mix-In (bzw. sein späterer Start bei Echo-Out/Cut)
+    const zero = side === "a" ? plan.mix_out.time : plan.mix_in.time - plan.automation.b_start_bar * wave.bar_len;
+    const at = (bar: number) => zero + bar * wave.bar_len!;
     const cues = side === "a" ? plan.cues_a : plan.cues_b;
     const markers: Marker[] = cues.map((c) => ({ time: c.time, label: `${c.name} · Pad ${c.pad}`, color: cueColor(c.name) }));
-    return { start, end: start + span * wave.bar_len, markers, highlight: { start: anchor, end: anchor + Math.max(plan.bars, 1) * wave.bar_len } };
+    return { start: at(VIEW_FROM), end: at(n + VIEW_TAIL), markers, highlight: { start: at(0), end: at(n) }, at };
   }, [wave, plan, side]);
 
   return (
@@ -140,7 +150,7 @@ function DeckWave({ deck, track, wave, plan, side, other }: { deck: number; trac
         <KeyBadge camelot={track.camelot} name={track.key_name} />
       </div>
       {view && wave ? (
-        <Waveform data={wave} start={view.start} end={view.end} markers={view.markers} highlight={view.highlight} height={104} showBars />
+        <Waveform data={wave} start={view.start} end={view.end} markers={view.markers} highlight={view.highlight} height={104} showBars cursor={pos === null ? null : view.at(pos)} />
       ) : track.has_analysis && (!wave || (plan.precise && !other)) ? (
         <div className="skeleton h-[104px]" />
       ) : wave ? (

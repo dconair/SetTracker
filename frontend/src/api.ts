@@ -67,6 +67,7 @@ export const api = {
   review: (id: number, curve: string, pin_first: boolean, pin_last: boolean, focus: string, order_by: string) =>
     call<Review>("GET", `/api/sets/${id}/review${q({ curve, pin_first, pin_last, focus, order_by })}`),
   refreshSet: (id: number) => call<{ changes: Changes; set: SetView }>("POST", `/api/sets/${id}/refresh`),
+  gridShift: (id: number, beats: 1 | -1) => call<TrackDetail>("POST", `/api/tracks/${id}/grid-shift`, { beats }),
   linkCandidates: (id: number) => call<Track[]>("GET", `/api/tracks/${id}/link-candidates`),
   linkTrack: (id: number, other_id: number) => call<Track>("POST", `/api/tracks/${id}/link`, { other_id }),
   unlinkTrack: (id: number) => call<{ file_id: number }>("POST", `/api/tracks/${id}/unlink`),

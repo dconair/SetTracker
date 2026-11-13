@@ -111,16 +111,31 @@ def enrich(track_ids: list[int], force: bool = False) -> dict:
     return result
 
 
-def _background(work) -> None:
-    def run() -> None:
-        try:
-            _state.update(running=True, result=None)
-            _state["result"] = work()
-        finally:
-            _state.update(running=False, phase="", message="")
+_jobs = threading.Lock()   # Aufträge laufen nacheinander, nie gleichzeitig
+_waiting = 0
 
+
+def _background(work) -> None:
+    """Auftrag im Hintergrund ausführen. Mehrere Aufträge werden der Reihe nach abgearbeitet;
+    „läuft“ gilt, bis der letzte fertig ist, und das Ergebnis gehört immer zum zuletzt beendeten."""
+    global _waiting
     with _lock:
-        threading.Thread(target=run, daemon=True, name="settracker-enrich").start()
+        _waiting += 1
+        _state.update(running=True, result=None)   # sofort sichtbar, nicht erst wenn der Thread anläuft
+
+    def run() -> None:
+        global _waiting
+        result = None
+        try:
+            with _jobs:
+                result = work()
+        finally:
+            with _lock:
+                _waiting -= 1
+                if _waiting == 0:
+                    _state.update(running=False, phase="", message="", result=result)
+
+    threading.Thread(target=run, daemon=True, name="settracker-enrich").start()
 
 
 def run_import(items: list[dict], collection: str, background: bool = True) -> list[int]:

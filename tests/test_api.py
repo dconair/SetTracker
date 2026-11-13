@@ -370,3 +370,49 @@ def test_musicbrainz_does_not_cache_failures(lib, monkeypatch):
     db.kv_set("mb:alter eintrag", [])  # Format älterer Versionen: leere Liste = wahrscheinlich Fehler
     answers["data"] = {"artists": [{"name": "Alter Eintrag", "score": 100, "tags": [{"name": "techno", "count": 1}]}]}
     assert musicbrainz.artist_genres("Alter Eintrag") == ["techno"]
+
+
+def test_grid_shift_and_review_plan_briefs(api, lib, demo_set):
+    track = lib["Rooftop Groove"]
+    before = api.get(f"/api/tracks/{track['id']}").json()["analysis"]
+    after = api.post(f"/api/tracks/{track['id']}/grid-shift", json={"beats": 1}).json()["analysis"]
+    beat = before["bar_len"] / 4
+    assert abs(after["first_downbeat"] - before["first_downbeat"] - beat) < 0.001
+    assert abs(after["sections"][1]["start"] - before["sections"][1]["start"] - beat) < 0.002
+    back = api.post(f"/api/tracks/{track['id']}/grid-shift", json={"beats": -1}).json()["analysis"]
+    assert abs(back["first_downbeat"] - before["first_downbeat"]) < 0.001
+    assert api.post(f"/api/tracks/{track['id']}/grid-shift", json={"beats": 3}).status_code == 400
+
+    r = api.get(f"/api/sets/{demo_set['id']}/review").json()
+    assert len(r["plans_before"]) == 4 and len(r["plans_after"]) == 4
+    assert all(p["title"] and p["bars"] >= 1 and p["out"] and p["into"] for p in r["plans_before"])
+    by_bpm = api.get(f"/api/sets/{demo_set['id']}/review", params={"order_by": "bpm"}).json()
+    bpms = [next(t["bpm"] for t in by_bpm["tracks"] if t["id"] == i) for i in by_bpm["order"]]
+    assert bpms == sorted(bpms) and by_bpm["order_by"] == "bpm" and "bpm" in by_bpm["order_options"]
+
+
+def test_background_jobs_run_one_after_another(lib):
+    import threading
+    import time
+
+    order, gate = [], threading.Event()
+
+    def slow():
+        order.append("a-start"); gate.wait(2); order.append("a-end")
+        return {"job": "a"}
+
+    def fast():
+        order.append("b")
+        return {"job": "b"}
+
+    importer._background(slow)
+    assert importer.status()["running"] and importer.status()["result"] is None   # sofort sichtbar
+    importer._background(fast)
+    time.sleep(0.15)
+    assert order == ["a-start"] and importer.status()["running"]                  # b wartet auf a
+    gate.set()
+    for _ in range(50):
+        if not importer.status()["running"]:
+            break
+        time.sleep(0.05)
+    assert order == ["a-start", "a-end", "b"] and importer.status()["result"] == {"job": "b"}

@@ -169,6 +169,30 @@ def patch_track(track_id: int, body: TrackPatch) -> dict:
     return present(need_track(track_id))
 
 
+class GridShift(BaseModel):
+    beats: int
+
+
+@app.post("/api/tracks/{track_id}/grid-shift")
+def grid_shift(track_id: int, body: GridShift) -> dict:
+    """Die erkannte Eins um ganze Schläge verschieben, wenn das Raster daneben liegt."""
+    t = need_track(track_id)
+    an = t["analysis"]
+    if not an or body.beats not in (-1, 1):
+        raise HTTPException(400, "Nur für analysierte Dateien, um genau einen Schlag vor oder zurück")
+    beat = an["bar_len"] / 4
+    delta = body.beats * beat
+    first = an["first_downbeat"] + delta
+    if first < 0:
+        first += an["bar_len"]          # nie vor den Trackanfang: stattdessen einen Takt später
+        delta += an["bar_len"]
+    an["first_downbeat"] = round(first, 4)
+    for sec in an["sections"]:
+        sec["start"], sec["end"] = round(sec["start"] + delta, 3), round(sec["end"] + delta, 3)
+    db.update_track(track_id, analysis=an)
+    return {**present(need_track(track_id)), "analysis": an}
+
+
 class Link(BaseModel):
     other_id: int
 
@@ -609,6 +633,17 @@ def review(set_id: int, curve: str = "free", pin_first: bool = False, pin_last: 
         for opt in fix["options"]:
             if opt["kind"] == "bridge":
                 opt["track"] = by_id[opt["track_id"]]
+    def brief(order: list[dict]) -> list[dict]:
+        out = []
+        for i in range(len(order) - 1):
+            p = transitions.plan(order[i], order[i + 1], deck_a=1 if i % 2 == 0 else 2)
+            out.append({"title": p["title"], "bars": p["automation"]["bars"], "why": p["why"],
+                        "out": p["mix_out"]["label"] if p.get("mix_out") else None, "into": p["mix_in"]["label"] if p.get("mix_in") else None})
+        return out
+
+    all_by_id = {t["id"]: t for t in tracks}
+    result["plans_before"] = brief(tracks)
+    result["plans_after"] = brief([all_by_id[i] for i in result["order"]])
     return {**result, "tracks": [by_id[t["id"]] for t in tracks], "name": s["name"], "pinned": sorted(pinned),
             "spotify_playlist_id": s.get("spotify_playlist_id"), "focus_options": review_engine.FOCUS_LABELS, "order_options": review_engine.ORDER_LABELS, "order_by": order_by if order_by in review_engine.ORDER_LABELS else "",
             "pending": sum(1 for t in tracks if t["status"] in ("pending", "analyzing"))}

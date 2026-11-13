@@ -1,9 +1,10 @@
-import { BookOpen, ChevronLeft, ChevronRight, Lightbulb, MousePointerClick, Pause, Play, RotateCcw, Timer } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { BookOpen, ChevronLeft, ChevronRight, Headphones, Lightbulb, MousePointerClick, Pause, Play, RotateCcw, Timer } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useBeat } from "./beat";
 import { Flx4 } from "./Flx4";
-import { MixLanes } from "./LearnVisuals";
-import type { Step } from "./types";
+import { controlValues, MixLanes } from "./LearnVisuals";
+import { MixPreview, type PreviewConfig } from "./mixPreview";
+import type { Automation, Step } from "./types";
 import { Button, cx } from "./ui";
 
 type Mode = "read" | "practice" | "run";
@@ -13,12 +14,33 @@ const MODES: [Mode, string, React.ReactNode][] = [
   ["run", "Ablauf im Takt", <Timer size={14} key="t" />],
 ];
 
+/** Taktposition, deren Reglerstellung zu einem Schritt gezeigt wird: der Zustand nach dem Schritt. */
+function stepPos(step: Step | undefined): number {
+  if (!step || step.bar_from === null) return -0.5;                    // Vorbereitung: Ausgangsstellung
+  const to = step.bar_to ?? step.bar_from;
+  return to > step.bar_from ? to : step.bar_from - 1 + 0.02;           // Bereich: Endstellung · Sprung: direkt danach
+}
+
+interface Props {
+  steps: Step[];
+  bpm: number;
+  automation: Automation;
+  /** Mit Audiodateien beider Tracks: hörbare Vorschau statt Übungs-Beat. */
+  preview?: PreviewConfig | null;
+  /** Sichtbarer Taktbereich der Reglerspuren (Standard: knapp um den Übergang). */
+  from?: number;
+  to?: number;
+  /** Meldet die aktuelle Taktposition (null = kein Zeiger), z. B. für Waveforms außerhalb. */
+  onPos?: (bar: number | null) => void;
+}
+
 /**
- * Schritt-für-Schritt-Trainer am Controller-Schema.
- * Anleitung: Schritte lesen, Bedienelemente leuchten. Üben: das richtige Bedienelement anklicken.
- * Ablauf im Takt: ein Übungs-Beat läuft, die Schritte werden zum passenden Takt aktiv.
+ * Schritt-für-Schritt-Trainer am Controller-Schema. Alle Ansichten lesen dieselbe Regler-Automation:
+ * Die Regler im Schema stehen so, wie sie zum gezeigten Takt stehen sollen.
+ * Anleitung: Schritte durchgehen. Üben: das richtige Bedienelement anklicken.
+ * Ablauf im Takt: Zeiger und Regler laufen mit – mit den eigenen Dateien hörbar, sonst mit Übungs-Beat.
  */
-export function StepTrainer({ steps, bpm, template, bars }: { steps: Step[]; bpm: number; template?: string; bars?: number }) {
+export function StepTrainer({ steps, bpm, automation, preview, from, to, onPos }: Props) {
   const [mode, setMode] = useState<Mode>("read");
   const [index, setIndex] = useState(0);
   const [found, setFound] = useState<string[]>([]);
@@ -26,20 +48,25 @@ export function StepTrainer({ steps, bpm, template, bars }: { steps: Step[]; bpm
   const [misses, setMisses] = useState(0);
   const [hint, setHint] = useState(false);
   const [finished, setFinished] = useState(false);
-  const [beatIndex, setBeatIndex] = useState(-1);
+  const [runPos, setRunPos] = useState<number | null>(null);
+  const [levels, setLevels] = useState<[number, number]>([0, 0]);
+  const [audioError, setAudioError] = useState(false);
+  const player = useRef<MixPreview | null>(null);
 
-  const lastBar = useMemo(() => Math.max(1, ...steps.map((s) => s.bar_to ?? 0)), [steps]);
+  const n = automation.bars;
+  const lastBar = useMemo(() => Math.max(n, ...steps.map((s) => s.bar_to ?? 0)), [steps, n]);
   const beat = useBeat({
     bpm,
     phraseBars: 8,
     onBeat: (i) => {
-      setBeatIndex(i);
-      if (Math.floor(i / 4) > lastBar) beat.stop();
+      setRunPos((i - 4) / 4);                 // ein Takt Einzählen
+      if (i / 4 - 1 > lastBar + 1) beat.stop();
     },
   });
 
+  const stopRun = () => { beat.stop(); player.current?.stop(); player.current = null; };
   const reset = (next: Mode = mode) => {
-    beat.stop();
+    stopRun();
     setMode(next);
     setIndex(0);
     setFound([]);
@@ -47,9 +74,10 @@ export function StepTrainer({ steps, bpm, template, bars }: { steps: Step[]; bpm
     setMisses(0);
     setHint(false);
     setFinished(false);
-    setBeatIndex(-1);
+    setRunPos(null);
   };
   useEffect(() => reset("read"), [steps]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => stopRun, []);            // eslint-disable-line react-hooks/exhaustive-deps
 
   const step = steps[index];
   const go = (i: number) => { setIndex(i); setFound([]); setWrong(null); setHint(false); };
@@ -70,21 +98,39 @@ export function StepTrainer({ steps, bpm, template, bars }: { steps: Step[]; bpm
     }
   };
 
-  // Ablauf im Takt: Takt 0 ist das Einzählen
-  const bar = beatIndex < 0 ? -1 : Math.floor(beatIndex / 4);
-  const running = mode === "run" && beat.playing;
-  const activeInRun = steps.map((s, i) => ({ s, i })).filter(({ s }) => s.bar_from !== null && bar >= s.bar_from && bar <= (s.bar_to ?? s.bar_from));
-  const runIndex = activeInRun.length ? activeInRun[activeInRun.length - 1].i : -1;
+  const running = mode === "run" && (beat.playing || runPos !== null && player.current !== null);
+  const startRun = async () => {
+    setRunPos(null);
+    setAudioError(false);
+    if (preview) {
+      const p = new MixPreview(preview, automation, (bar) => {
+        setRunPos(bar);
+        if (bar === null) player.current = null; else setLevels(p.levels());
+      });
+      player.current = p;
+      try { await p.start(); } catch { p.stop(); setAudioError(true); beat.start(); }
+    } else beat.start();
+  };
 
+  // Welche Taktposition zeigen Regler und Zeiger gerade?
+  const pos = mode === "run" ? runPos : mode === "practice" ? stepPos(steps[index - 1]) : stepPos(step);
+  useEffect(() => { onPos?.(mode === "run" ? runPos : mode === "read" ? stepPos(step) : null); }, [mode, runPos, step]); // eslint-disable-line react-hooks/exhaustive-deps
+  const values = useMemo(() => controlValues(automation, pos ?? -0.5), [automation, pos]);
+
+  const bar = runPos === null ? null : Math.floor(runPos) + 1;       // Taktnummer (1 = erster Takt des Übergangs)
+  const activeInRun = steps.map((s, i) => ({ s, i })).filter(({ s }) => bar !== null && s.bar_from !== null && bar >= s.bar_from && bar <= (s.bar_to ?? s.bar_from));
+  const runIndex = activeInRun.length ? activeInRun[activeInRun.length - 1].i : -1;
   const active =
     mode === "read" ? step?.controls ?? []
     : mode === "practice" ? (hint ? (step?.controls ?? []).filter((c) => !found.includes(c)) : [])
     : activeInRun.flatMap(({ s }) => s.controls);
   const currentIndex = mode === "run" ? runIndex : index;
+  const beatInBar = runPos === null ? -1 : Math.floor(((runPos % 1) + 1) % 1 * 4);
+  const range: [number, number] | null = mode !== "run" && step?.bar_from ? [step.bar_from, Math.min(step.bar_to ?? step.bar_from, n + 1)] : null;
 
   return (
     <div>
-      <div className="sticky top-0 z-10 rounded-xl border border-line bg-surface p-3" style={{ boxShadow: "var(--shadow)" }}>
+      <div className="rounded-xl border border-line bg-surface p-3">
         <div className="mb-2 flex gap-1 rounded-lg bg-bg p-1" role="tablist">
           {MODES.map(([key, label, icon]) => (
             <button key={key} role="tab" aria-selected={mode === key} onClick={() => reset(key)}
@@ -93,16 +139,20 @@ export function StepTrainer({ steps, bpm, template, bars }: { steps: Step[]; bpm
             </button>
           ))}
         </div>
-        <Flx4 active={active} done={mode === "practice" ? found : []} wrong={wrong} onPick={mode === "practice" && !finished ? pick : undefined} />
+        <Flx4 active={active} values={values} done={mode === "practice" ? found : []} wrong={wrong} onPick={mode === "practice" && !finished ? pick : undefined} />
+        <p className="mt-1 text-center text-[11px] text-faint">Die Regler im Schema stehen so, wie sie {mode === "run" ? "im aktuellen Takt" : "nach diesem Schritt"} stehen sollen. Leuchtende Regler werden gerade bewegt.</p>
 
         {mode === "read" && (
-          <div className="mt-2 flex items-center gap-3">
-            <Button size="sm" disabled={index === 0} onClick={() => go(index - 1)} icon={<ChevronLeft size={15} />}>Zurück</Button>
-            <div className="min-w-0 flex-1 text-center text-[13px]">
-              <span className="font-semibold text-accent">Schritt {index + 1}/{steps.length} · {step?.when}</span>
-              {step?.controls.length === 0 && <span className="text-faint"> · kein Bedienelement</span>}
+          <div className="mt-2">
+            <div className="flex items-center gap-3">
+              <Button size="sm" disabled={index === 0} onClick={() => go(index - 1)} icon={<ChevronLeft size={15} />}>Zurück</Button>
+              <div className="min-w-0 flex-1 text-center text-[13px] font-semibold text-accent">Schritt {index + 1}/{steps.length} · {step?.when}</div>
+              <Button size="sm" variant="primary" disabled={index >= steps.length - 1} onClick={() => go(index + 1)}>Weiter <ChevronRight size={15} /></Button>
             </div>
-            <Button size="sm" variant="primary" disabled={index >= steps.length - 1} onClick={() => go(index + 1)}>Weiter <ChevronRight size={15} /></Button>
+            <div className="mt-2 rounded-lg bg-accent-soft px-3 py-2 text-[13px] leading-relaxed">
+              {step?.text}
+              {step?.why && <div className="mt-1 text-xs text-muted"><b className="font-semibold text-text">Warum:</b> {step.why}</div>}
+            </div>
           </div>
         )}
 
@@ -129,51 +179,51 @@ export function StepTrainer({ steps, bpm, template, bars }: { steps: Step[]; bpm
 
         {mode === "run" && (
           <div className="mt-2">
-            <div className="flex items-center gap-3">
-              <Button size="sm" variant="primary" icon={running ? <Pause size={14} /> : <Play size={14} />} onClick={() => { if (running) beat.stop(); else { setBeatIndex(-1); beat.start(); } }}>
-                {running ? "Stopp" : "Start"}
+            <div className="flex flex-wrap items-center gap-3">
+              <Button size="sm" variant="primary" icon={running ? <Pause size={14} /> : <Play size={14} />} onClick={() => { if (running) { stopRun(); setRunPos(null); } else startRun(); }}>
+                {running ? "Stopp" : preview ? "Übergang anhören" : "Start"}
               </Button>
               <div className="min-w-0 flex-1 text-[13px]">
-                {bar < 0 ? <span className="text-muted">Ein Übungs-Beat mit {Math.round(bpm)} BPM läuft, die Schritte werden zum richtigen Takt aktiv. Erst ein Takt Einzählen.</span>
-                  : bar === 0 ? <span className="font-semibold text-muted">Einzählen …</span>
-                  : bar > lastBar ? <span className="font-semibold text-good">Fertig – der Übergang ist durch.</span>
-                  : <span className="font-semibold text-accent">Takt {bar} von {lastBar}</span>}
+                {runPos === null ? <span className="text-muted">{preview
+                  ? <><Headphones size={13} className="mr-1 inline text-accent" />Spielt beide Tracks ab 4 Takte vor dem Mix-Punkt und bewegt EQ, Filter und Fader wie geplant.</>
+                  : `Ein Übungs-Beat mit ${Math.round(bpm)} BPM läuft, Regler und Zeiger bewegen sich im Takt. Erst ein Takt Einzählen.`}</span>
+                  : runPos < 0 ? <span className="font-semibold text-muted">{preview ? `Noch ${Math.ceil(-runPos)} Takt${Math.ceil(-runPos) === 1 ? "" : "e"} bis zum Mix-Punkt …` : "Einzählen …"}</span>
+                  : runPos >= n ? <span className="font-semibold text-good">Übergang durch – Track B läuft allein.</span>
+                  : <span className="font-semibold text-accent">Takt {bar} von {n}</span>}
               </div>
               <div className="flex gap-1.5" aria-hidden>
                 {[0, 1, 2, 3].map((b) => (
-                  <span key={`${b}-${beatIndex}`} className={cx("num flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold", beatIndex >= 0 && beatIndex % 4 === b ? "beat-pop bg-accent text-accent-fg" : "bg-hover text-faint")}>{b + 1}</span>
+                  <span key={b} className={cx("num flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold transition-colors", beatInBar === b ? "bg-accent text-accent-fg" : "bg-hover text-faint")}>{b + 1}</span>
                 ))}
               </div>
             </div>
-            <div className="mt-2.5 flex gap-0.5">
-              {Array.from({ length: lastBar }, (_, i) => {
-                const hasStep = steps.some((s) => s.bar_from === i + 1);
-                return <span key={i} title={`Takt ${i + 1}`} className="h-2 flex-1 rounded-sm" style={{ background: bar === i + 1 ? "var(--accent)" : bar > i + 1 ? "color-mix(in srgb, var(--accent) 40%, var(--line))" : hasStep ? "var(--faint)" : "var(--line)" }} />;
-              })}
-            </div>
+            {preview && running && (
+              <div className="mt-2 grid grid-cols-2 gap-3 text-[11px] text-muted" data-testid="levels">
+                {(["a", "b"] as const).map((side, i) => (
+                  <div key={side} className="flex items-center gap-2">Deck {preview[side].deck}
+                    <span className="h-1.5 flex-1 overflow-hidden rounded-full bg-line"><span className="block h-full rounded-full" data-level={levels[i].toFixed(3)} style={{ width: `${levels[i] * 100}%`, background: i === 0 ? "var(--wave-low)" : "var(--wave-mid)" }} /></span>
+                  </div>
+                ))}
+              </div>
+            )}
+            {audioError && <p className="mt-2 text-xs text-ok">Die Audiodateien ließen sich nicht abspielen – der Ablauf läuft mit Übungs-Beat.</p>}
+            {!preview && <p className="mt-2 text-xs text-faint">Hörbar mit den echten Tracks wird der Übergang, sobald beide als Audiodatei in der Bibliothek liegen.</p>}
           </div>
         )}
       </div>
 
-      {template && (
-        <div className="mt-3 rounded-xl border border-line bg-surface p-4">
-          <div className="mb-2 flex items-baseline justify-between gap-3">
-            <h4 className="text-[13px] font-semibold">Was die Regler machen</h4>
-            <span className="text-xs text-faint">{mode === "run" ? "Der Zeiger läuft im Takt mit" : "Der hinterlegte Bereich gehört zum aktuellen Schritt"}</span>
-          </div>
-          <MixLanes
-            template={template}
-            bars={Math.max(bars ?? 0, 1)}
-            progress={mode === "run" && beatIndex >= 4 ? (beatIndex - 4) / (Math.max(bars ?? 0, 1) * 4) : null}
-            range={mode !== "run" && step?.bar_from ? [step.bar_from, Math.min(step.bar_to ?? step.bar_from, Math.max(bars ?? 0, 1) + 1)] : null}
-          />
+      <div className="mt-3 rounded-xl border border-line bg-surface p-4">
+        <div className="mb-2 flex items-baseline justify-between gap-3">
+          <h4 className="text-[13px] font-semibold">Regler über die Takte</h4>
+          <span className="text-xs text-faint">{mode === "run" ? "Der Zeiger läuft mit" : "Hinterlegt: Takte des aktuellen Schritts"}</span>
         </div>
-      )}
+        <MixLanes automation={automation} from={from ?? -1} to={to ?? n + 1} pos={pos} range={range} />
+      </div>
 
       <ol className="mt-3 overflow-hidden rounded-xl border border-line bg-surface">
         {steps.map((s, i) => {
           const current = i === currentIndex || (mode === "run" && activeInRun.some((a) => a.i === i));
-          const past = mode === "practice" ? i < index || finished : mode === "run" && s.bar_to !== null && bar > s.bar_to;
+          const past = mode === "practice" ? i < index || finished : mode === "run" && bar !== null && s.bar_to !== null && bar > s.bar_to;
           return (
             <li key={i}>
               <button onClick={() => mode === "read" && go(i)} disabled={mode !== "read"} aria-current={current ? "step" : undefined}
@@ -185,6 +235,7 @@ export function StepTrainer({ steps, bpm, template, bars }: { steps: Step[]; bpm
                     {s.deck && <span className="rounded bg-hover px-1.5 py-px font-medium text-muted">Deck {s.deck}</span>}
                   </span>
                   <span className="block text-[13px] leading-relaxed">{mode === "practice" && i > index && !finished ? <span className="text-faint">Kommt gleich …</span> : s.text}</span>
+                  {s.why && !(mode === "practice" && i > index && !finished) && <span className="mt-0.5 block text-xs text-muted">{s.why}</span>}
                 </span>
               </button>
             </li>

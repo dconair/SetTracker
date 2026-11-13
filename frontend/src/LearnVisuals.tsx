@@ -1,97 +1,83 @@
 import { useState } from "react";
+import type { Automation, Curve } from "./types";
 import { cx } from "./ui";
 
 const A = "var(--wave-low)";
 const B = "var(--wave-mid)";
 
 // ------------------------------------------------------------------ Regler-Verlauf eines Übergangs
-type Pts = [number, number][];
-interface Lane { label: string; hint?: string; a?: Pts; b?: Pts; band?: [number, number, string] }
+/** Wert einer Kurve zum Takt `bar` (linear zwischen den Punkten, davor/danach konstant). */
+export function valueAt(points: Curve, bar: number): number {
+  if (bar <= points[0][0]) return points[0][1];
+  for (let i = 0; i < points.length - 1; i++) {
+    const [b0, v0] = points[i], [b1, v1] = points[i + 1];
+    if (bar >= b0 && bar < b1) return v0 + ((v1 - v0) * (bar - b0)) / (b1 - b0);
+  }
+  return points[points.length - 1][1];
+}
 
-/** Verlauf der wichtigsten Regler über den Übergang; x = 0…1 über die Überblend-Takte, y = 0…1. */
-const LANES: Record<string, Lane[]> = {
-  bass_swap: [
-    { label: "Lautstärke", hint: "Kanalfader", a: [[0, 1], [0.5, 1], [1, 0]], b: [[0, 0], [0.5, 1], [1, 1]] },
-    { label: "Bass", hint: "EQ LOW", a: [[0, 1], [0.5, 1], [0.5, 0], [1, 0]], b: [[0, 0], [0.5, 0], [0.5, 1], [1, 1]] },
-    { label: "Mitten", hint: "EQ MID", a: [[0, 1], [0.5, 1], [0.7, 0.4], [1, 0.4]], b: [[0, 1], [1, 1]] },
-  ],
-  filter_fade: [
-    { label: "Lautstärke", hint: "Kanalfader", a: [[0, 1], [0.5, 1], [1, 0]], b: [[0, 0.75], [0.5, 0.75], [1, 1]] },
-    { label: "Filter", hint: "CFX · Mitte = neutral", a: [[0, 0.5], [0.5, 0.9], [1, 0.9]], b: [[0, 0.15], [0.5, 0.5], [1, 0.5]] },
-  ],
-  echo_out: [
-    { label: "Lautstärke", hint: "Kanalfader", a: [[0, 1], [0.92, 1], [1, 0]], b: [[0, 0], [1, 0], [1, 1], [1.12, 1]] },
-    { label: "Echo", hint: "BEAT FX auf A", band: [0, 1.06, "Echo an"] },
-  ],
-  loop_out: [
-    { label: "Loop", hint: "4 BEAT/EXIT auf A", band: [0, 1, "letzter Takt als Schleife"] },
-    { label: "Lautstärke", hint: "Kanalfader", a: [[0, 1], [0.5, 1], [1, 0]], b: [[0, 0], [0.5, 1], [1, 1]] },
-    { label: "Bass", hint: "EQ LOW", a: [[0, 1], [0.5, 1], [0.5, 0], [1, 0]], b: [[0, 0], [0.5, 0], [0.5, 1], [1, 1]] },
-  ],
-  cut: [
-    { label: "Lautstärke", hint: "Crossfader in einem Zug", a: [[0, 1], [1, 1], [1, 0], [1.12, 0]], b: [[0, 0], [1, 0], [1, 1], [1.12, 1]] },
-  ],
-  smart_fader: [
-    { label: "Crossfader", hint: "gleichmäßig schieben", a: [[0, 1], [1, 0]], b: [[0, 0], [1, 1]] },
-    { label: "Automatik", hint: "SMART FADER", band: [0, 1, "Tempo, Bass und Lautstärke werden angeglichen"] },
-  ],
-};
+/** Alle Reglerstellungen zum Takt `bar` – für die Controller-Animation. */
+export function controlValues(auto: Automation, bar: number): Record<string, number> {
+  const out: Record<string, number> = { ...auto.rest };
+  for (const [id, pts] of Object.entries(auto.controls)) out[id] = valueAt(pts, bar);
+  return out;
+}
 
 /**
- * Zeigt, wie sich die Regler über den Übergang bewegen – wie Automationsspuren.
- * `progress` (0…1 über die Überblend-Takte) setzt den Zeiger, `range` hebt einen Taktbereich hervor.
+ * Reglerspuren über die Takte des Übergangs. `from`/`to` legen den sichtbaren Taktbereich fest
+ * (0 = Beginn des Übergangs) – derselbe Bereich wie bei den Waveforms darüber, damit alles
+ * auf einer Achse liegt. `pos` setzt den Zeiger, `range` hebt den Taktbereich eines Schritts hervor.
  */
-export function MixLanes({ template, bars, progress, range }: { template: string; bars: number; progress?: number | null; range?: [number, number] | null }) {
-  const lanes = LANES[template];
-  if (!lanes) return null;
-  const n = Math.max(bars, 1);
-  const W = 640, left = 96, right = 14, laneH = 44, gap = 10, top = 20;
-  const lead = 0.12;                                   // Vorlauf/Nachlauf links und rechts
-  const x = (v: number) => left + ((v + lead) / (1 + 2 * lead)) * (W - left - right);
-  const H = top + lanes.length * (laneH + gap) + 4;
-  const path = (pts: Pts, y0: number) => {
-    const all: Pts = [[-lead, pts[0][1]], ...pts, [1 + lead, pts[pts.length - 1][1]]];
-    return all.map(([px, py], i) => `${i ? "L" : "M"}${x(Math.min(px, 1 + lead)).toFixed(1)},${(y0 + (1 - py) * (laneH - 8) + 4).toFixed(1)}`).join(" ");
+export function MixLanes({ automation, from = -1, to, pos, range, onSeek }: { automation: Automation; from?: number; to?: number; pos?: number | null; range?: [number, number] | null; onSeek?: (bar: number) => void }) {
+  const n = automation.bars;
+  const end = to ?? n + 1;
+  const W = 640, laneH = 40, gap = 6, top = 18;
+  const x = (bar: number) => ((bar - from) / (end - from)) * W;
+  const lanes = automation.groups;
+  const H = top + lanes.length * (laneH + gap);
+  const path = (pts: Curve, y0: number) => {
+    const all: Curve = [[from, pts[0][1]], ...pts, [end, pts[pts.length - 1][1]]];
+    return all.map(([b, v], i) => `${i ? "L" : "M"}${x(b).toFixed(1)},${(y0 + 5 + (1 - v) * (laneH - 10)).toFixed(1)}`).join(" ");
   };
-  const ticks = n <= 2 ? [0, n] : n <= 8 ? Array.from({ length: n + 1 }, (_, i) => i) : Array.from({ length: n / 4 + 1 }, (_, i) => i * 4);
+  const step = end - from > 24 ? 8 : end - from > 10 ? 4 : 1;
+  const ticks: number[] = [];
+  for (let t = Math.ceil(from / step) * step; t <= end; t += step) ticks.push(t);
 
   return (
     <div>
-      <svg viewBox={`0 0 ${W} ${H}`} className="block w-full" role="img" aria-label="Verlauf der Regler über den Übergang">
-        {range && <rect x={x((range[0] - 1) / n)} y={top - 4} width={Math.max(3, x(range[1] / n) - x((range[0] - 1) / n))} height={H - top} rx={4} fill="var(--accent)" opacity={0.12} />}
+      <svg viewBox={`0 0 ${W} ${H}`} className={cx("block w-full", onSeek && "cursor-pointer")} role="img" aria-label="Verlauf der Regler über den Übergang"
+        onClick={onSeek ? (e) => { const r = e.currentTarget.getBoundingClientRect(); onSeek(from + ((e.clientX - r.left) / r.width) * (end - from)); } : undefined}>
+        <rect x={x(0)} y={top - 2} width={x(n) - x(0)} height={H - top} fill="var(--accent)" opacity={0.07} />
+        {range && <rect x={x(range[0] - 1)} y={top - 2} width={Math.max(3, x(range[1]) - x(range[0] - 1))} height={H - top} rx={3} fill="var(--accent)" opacity={0.16} />}
         {ticks.map((t) => (
           <g key={t}>
-            <line x1={x(t / n)} x2={x(t / n)} y1={top - 4} y2={H} stroke="var(--line)" strokeWidth={1} />
-            <text x={x(t / n)} y={11} textAnchor="middle" fontSize={9} fill="var(--faint)" fontWeight={600}>{t === n ? "Ende" : `Takt ${t + 1}`}</text>
+            <line x1={x(t)} x2={x(t)} y1={top - 2} y2={H} stroke="var(--line)" strokeWidth={t % 8 === 0 ? 1.5 : 0.75} />
+            {t >= 0 && t <= n && <text x={x(t) + 3} y={11} fontSize={8.5} fill={t % 8 === 0 ? "var(--muted)" : "var(--faint)"} fontWeight={600}>{t === n ? "Ende" : `Takt ${t + 1}`}</text>}
           </g>
         ))}
         {lanes.map((lane, i) => {
           const y0 = top + i * (laneH + gap);
           return (
             <g key={lane.label}>
-              <rect x={left - 4} y={y0} width={W - left - right + 4} height={laneH} rx={6} fill="var(--raised)" stroke="var(--line)" />
-              <text x={0} y={y0 + 19} fontSize={11} fontWeight={600} fill="var(--text)">{lane.label}</text>
-              {lane.hint && <text x={0} y={y0 + 32} fontSize={8.5} fill="var(--faint)">{lane.hint}</text>}
-              {lane.band && <>
-                <rect x={x(lane.band[0])} y={y0 + 10} width={x(lane.band[1]) - x(lane.band[0])} height={laneH - 20} rx={5} fill="var(--accent)" opacity={0.3} />
-                <text x={(x(lane.band[0]) + x(lane.band[1])) / 2} y={y0 + laneH / 2 + 3.5} textAnchor="middle" fontSize={9.5} fontWeight={600} fill="var(--text)">{lane.band[2]}</text>
-              </>}
+              <rect x={0} y={y0} width={W} height={laneH} rx={5} fill="var(--raised)" opacity={0.55} stroke="var(--line)" />
+              {lane.band && <rect x={x(lane.band[0])} y={y0 + 9} width={x(lane.band[1]) - x(lane.band[0])} height={laneH - 18} rx={5} fill="var(--accent)" opacity={0.35} />}
               {lane.a && <path d={path(lane.a, y0)} fill="none" stroke={A} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />}
-              {lane.b && <path d={path(lane.b, y0)} fill="none" stroke={B} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" strokeDasharray="none" opacity={0.95} />}
+              {lane.b && <path d={path(lane.b, y0)} fill="none" stroke={B} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />}
+              <text x={6} y={y0 + laneH / 2 + 3} fontSize={9.5} fontWeight={700} fill="var(--text)" stroke="var(--surface)" strokeWidth={3.5} paintOrder="stroke">
+                {lane.label}<tspan fontSize={7.5} fontWeight={500} fill="var(--muted)"> · {lane.hint}</tspan>
+              </text>
+              {pos !== null && pos !== undefined && (lane.a || lane.b) && [lane.a ? [lane.a, A] as const : null, lane.b ? [lane.b, B] as const : null].map((entry) => entry && (
+                <circle key={entry[1]} cx={x(pos)} cy={y0 + 5 + (1 - valueAt(entry[0], pos)) * (laneH - 10)} r={4} fill={entry[1]} stroke="var(--bg)" strokeWidth={1.5} />
+              ))}
             </g>
           );
         })}
-        {progress !== null && progress !== undefined && progress >= -lead && progress <= 1 + lead && (
-          <g>
-            <line x1={x(progress)} x2={x(progress)} y1={top - 6} y2={H} stroke="var(--text)" strokeWidth={2} />
-            <circle cx={x(progress)} cy={top - 6} r={4} fill="var(--text)" />
-          </g>
-        )}
+        {pos !== null && pos !== undefined && pos >= from && pos <= end && <line x1={x(pos)} x2={x(pos)} y1={top - 6} y2={H} stroke="var(--text)" strokeWidth={1.5} />}
       </svg>
       <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
         <span className="flex items-center gap-1.5"><span className="h-0.5 w-5 rounded-full" style={{ background: A }} />Track A (läuft)</span>
         <span className="flex items-center gap-1.5"><span className="h-0.5 w-5 rounded-full" style={{ background: B }} />Track B (kommt)</span>
-        <span className="text-faint">oben = voll auf · unten = zu</span>
+        <span className="text-faint">oben = voll auf bzw. rechts · Mitte = 12 Uhr · unten = zu bzw. links</span>
       </div>
     </div>
   );

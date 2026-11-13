@@ -10,9 +10,12 @@ interface Props {
   wrong?: string | null;
   /** Macht die Bedienelemente anklickbar. */
   onPick?: (id: string) => void;
+  /** Reglerstellungen 0…1 je Bedienelement: Drehregler drehen sich (7 bis 5 Uhr), Fader wandern. */
+  values?: Record<string, number>;
 }
 
-export function Flx4({ active, done = [], wrong, onPick }: Props) {
+export function Flx4({ active, done = [], wrong, onPick, values }: Props) {
+  const val = (id: string, fallback: number) => Math.min(1, Math.max(0, values?.[id] ?? fallback));
   const bind = (id: string) => ({
     className: cx("flx", active.includes(id) && "flx-on", done.includes(id) && "flx-done", wrong === id && "flx-wrong", onPick && "flx-pick"),
     onClick: onPick ? () => onPick(id) : undefined,
@@ -21,7 +24,7 @@ export function Flx4({ active, done = [], wrong, onPick }: Props) {
   const Knob = ({ id, x, y, label, r = 13 }: { id: string; x: number; y: number; label: string; r?: number }) => (
     <g {...bind(id)}>
       <circle cx={x} cy={y} r={r} className="flx-shape" />
-      <line x1={x} y1={y - r + 3} x2={x} y2={y - 3} className="flx-mark" />
+      <line x1={x} y1={y - r + 3} x2={x} y2={y - 3} className="flx-mark" transform={`rotate(${-150 + val(id, 0.5) * 300} ${x} ${y})`} style={{ transition: "transform 0.12s linear" }} />
       <text x={x} y={y + r + 11} className="flx-label">{label}</text>
     </g>
   );
@@ -34,7 +37,7 @@ export function Flx4({ active, done = [], wrong, onPick }: Props) {
   const Fader = ({ id, x, y, h, label }: { id: string; x: number; y: number; h: number; label: string }) => (
     <g {...bind(id)}>
       <rect x={x - 2} y={y} width={4} height={h} rx={2} className="flx-track" />
-      <rect x={x - 11} y={y + h * 0.55} width={22} height={12} rx={3} className="flx-shape" />
+      <rect x={x - 11} y={y + (1 - val(id, 0.45)) * (h - 12)} width={22} height={12} rx={3} className="flx-shape" style={{ transition: "y 0.12s linear" }} />
       <text x={x} y={y + h + 13} className="flx-label">{label}</text>
     </g>
   );
@@ -120,7 +123,7 @@ export function Flx4({ active, done = [], wrong, onPick }: Props) {
       </g>
       <g {...bind("crossfader")}>
         <rect x={430} y={390} width={140} height={4} rx={2} className="flx-track" />
-        <rect x={488} y={381} width={24} height={22} rx={4} className="flx-shape" />
+        <rect x={430 + val("crossfader", 0.5) * 116} y={381} width={24} height={22} rx={4} className="flx-shape" style={{ transition: "x 0.12s linear" }} />
       </g>
     </svg>
   );

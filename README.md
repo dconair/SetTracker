@@ -16,7 +16,7 @@ für den **Pioneer DDJ-FLX4** (rekordbox) planen. Läuft lokal auf deinem Rechne
 - **Playlist-Check** – bewertet eine fertige Playlist (Spotify, M3U, rekordbox-XML oder ein Set) Song für Song,
   zeigt einen Umbau-Vorschlag im Vorher/Nachher-Vergleich und Einzel-Eingriffe (tauschen, Brücken-Track,
   Ausreißer entfernen). Das Original wird nie überschrieben.
-- **Übergänge** – wählt je Paar eine Übergangsart (Bass-Swap-Blend, Filter-Fade, Echo-Out, Loop-Out, Cut,
+- **Übergänge** – wählt je Paar eine Übergangsart (Blend, Rise, Fade, Bass-Swap, Echo-Out, Loop-Out, Cut,
   Smart Fader), markiert Mix-Out/Mix-In in den Waveforms und führt Schritt für Schritt durch die Handgriffe:
   Ein Schema des FLX4 hebt je Schritt die Regler und Tasten hervor.
 - **Export** – Spotify-Playlist, rekordbox-XML (Beatgrid + Hot Cues MIX IN / DROP / BASS SWAP / MIX OUT),
@@ -95,10 +95,18 @@ Klappt etwas nicht, zeigt **Verbindung prüfen** im selben Dialog Schritt für S
 
 Gut zu wissen:
 
-- Spotify gibt Apps keine BPM-, Tonart-, Genre- oder Strukturdaten und kein Audio mehr. SetTracker holt BPM,
-  Tonart, Energie und Stimmung deshalb von [ReccoBeats](https://reccobeats.com) und Genres über den Künstler
-  von [MusicBrainz](https://musicbrainz.org) (eine Anfrage pro Sekunde – große Bibliotheken brauchen etwas).
-  Nicht jeder Track ist dort bekannt; Genres lassen sich in der Bibliothek auch von Hand setzen.
+- Spotify gibt Apps keine BPM-, Tonart-, Genre- oder Strukturdaten und kein Audio mehr. SetTracker fragt
+  deshalb der Reihe nach andere Quellen ab: [ReccoBeats](https://reccobeats.com) für BPM, Tonart, Energie und
+  Stimmung; kennt ReccoBeats den Track nicht, schätzt die eigene Analyse diese Werte aus dem
+  30-Sekunden-Vorhörclip von [Deezer](https://developers.deezer.com/api) (der Clip wird dafür kurz geladen und
+  sofort wieder gelöscht). Genres kommen über den Künstler von [MusicBrainz](https://musicbrainz.org), sonst
+  vom Album bei Deezer.
+- Werte aus dem Vorhörclip sind **Schätzungen aus einem Ausschnitt** und in der App mit „~“ markiert; sie können
+  danebenliegen, vor allem bei Drum & Bass oder wenn der Ausschnitt ein Break ist. Passt ein Tempo nicht zum
+  Genre, warnt die App und schlägt bei Halb-/Doppeltempo die Korrektur vor.
+- **Daten ergänzen** in der Bibliothek schlägt alles Fehlende nach und meldet am Ende, was gefunden wurde.
+  In den Track-Details lässt sich ein einzelner Track **erneut suchen** und BPM, Tonart und Genre **von Hand
+  korrigieren** (mit „×2“ / „÷2“).
 - **Sets lassen sich komplett aus Spotify-Tracks bauen** – Wertung, Reihenfolge, Smart Shuffle, Übergangsart
   und die Anleitung am Controller-Schema funktionieren. Was dabei fehlt: Waveform, erkannte Phasen
   (Intro/Drop/Break/Outro) und taktgenaue Mix-Punkte gibt es nur für lokale Audiodateien. Für Spotify-Tracks
@@ -122,6 +130,28 @@ Gut zu wissen:
    „Vorhandene Datei von Hand zuordnen“; eine falsche Zuordnung lässt sich dort wieder lösen.
 5. **Exportieren.** Sind alle Tracks als Datei da, stimmen Hot Cues, Loops und Mix-Punkte taktgenau –
    rekordbox-XML und Spickzettel exportieren.
+
+## Übergänge im Detail
+
+Jeder Übergang ist als **Regler-Automation pro Takt** hinterlegt: Lautstärke, die drei EQ-Bänder, Filter und
+Effekte beider Decks. Daraus entstehen Schritt-Texte, Diagramm, Controller-Animation und Hörvorschau – sie
+zeigen deshalb immer dasselbe. Die Vorlagen orientieren sich an den Bausteinen von Spotifys Mix-Funktion
+(Lautstärke-, EQ- und Effektkurven), sind aber so gebaut, dass sie am DDJ-FLX4 von Hand spielbar sind:
+
+| Vorlage | Ablauf | Wann |
+|---|---|---|
+| **Blend** | Höhen, Mitten und Bass wechseln nacheinander über 16–32 Takte | lange Outros/Intros, passende Tonart |
+| **Rise** | B kommt über den Filter herein, Bass-Tausch auf der Phrasengrenze, A läuft dünn aus | 8–16 Takte Überlappung |
+| **Fade** | Crossfade über 4–8 Takte mit Bass-Tausch in der Mitte | kurze Überlappung |
+| **Bass-Swap** | Zwei-Band-Klassiker: gemeinsam laufen, Bass in einem Schlag tauschen | wie Blend, einfacher |
+| **Echo-Out / Loop-Out / Cut / Smart Fader** | für Tonart-Clash, fehlendes Outro, harte Wechsel, große Temposprünge | |
+
+In der Übergangs-Ansicht liegen beide Waveforms, die Reglerspuren und der Zeiger auf **einer Taktachse**. Die
+Regler im Controller-Schema stehen so, wie sie zum gezeigten Takt stehen sollen, und jeder Schritt nennt Takt,
+Reglerstellung („LOW von 12 auf 7 Uhr“) und den Grund. Liegen beide Tracks als Audiodatei vor, spielt
+**Übergang anhören** den geplanten Übergang mit deinen Dateien ab – mit EQ, Filter und Fadern wie geplant.
+Die Vorschau ist eine Annäherung im Browser (Tempo von B wird angeglichen, Echo vereinfacht); maßgeblich
+bleibt, wie es am Controller klingt.
 
 ## Hot Cues, Loops und Phasen
 
@@ -147,7 +177,8 @@ Struktur bitte in rekordbox gegenprüfen.
 
 Der Bereich **Lernen** funktioniert ohne angeschlossenen Controller:
 
-- **Takte & Phrasen zählen** – ein Übungs-Beat mit einstellbarem Tempo, Zählfelder und eine Phrasen-Uhr
+- **Takte & Phrasen zählen** – mit einem **Track aus deiner Bibliothek** (lokale Datei: gezählt wird über
+  sein Beatgrid, mit Sprung „8 Takte vor dem Drop“ und Raster-Korrektur) oder einem Übungs-Beat mit einstellbarem Tempo, Zählfelder und eine Phrasen-Uhr
   (8 Takte = 32 Schläge). In der Übung drückst du die Leertaste auf die Eins einer neuen Phrase und siehst,
   wie genau du getroffen hast. Dazu: ein Vergleich „auf der Eins gestartet / daneben“ und der typische
   Bauplan eines Tracks mit den zugehörigen Pads.

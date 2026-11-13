@@ -67,7 +67,15 @@ export interface SetInfo { id: number; name: string; count: number; origin: stri
 export interface Suggestion { track: Track; score: number; verdict: Verdict; reasons: string[] }
 
 export interface Cue { pad: number; name: string; time: number; label: string }
-export interface Step { when: string; deck: number | null; text: string; controls: string[]; bar_from: number | null; bar_to: number | null }
+export interface Step { when: string; deck: number | null; text: string; why: string; controls: string[]; bar_from: number | null; bar_to: number | null }
+export type Curve = [number, number][];
+export interface Automation {
+  bars: number;
+  controls: Record<string, Curve>;
+  rest: Record<string, number>;
+  groups: { label: string; hint: string; a?: Curve | null; b?: Curve | null; band?: [number, number] }[];
+  b_start_bar: number;
+}
 export interface Plan {
   template: string;
   title: string;
@@ -83,6 +91,9 @@ export interface Plan {
   cues_a: Cue[];
   cues_b: Cue[];
   steps: Step[];
+  automation: Automation;
+  bar_len_a?: number;
+  bar_len_b?: number;
 }
 export interface TransitionDetail { index: number; a: Track; b: Track; score: Score; plan: Plan }
 
@@ -126,7 +137,10 @@ export interface Review {
   focus_options: Record<string, string>;
   order_options: Record<string, string>;
   order_by: string;
+  plans_before: PlanBrief[];
+  plans_after: PlanBrief[];
 }
+export interface PlanBrief { title: string; bars: number; why: string; out: string | null; into: string | null }
 
 export interface Status {
   desktop: boolean;
@@ -146,12 +160,13 @@ export interface SpotifyPlaylist { id: string; name: string; count: number | nul
 
 export interface TrackCue { pad: number; letter: string; name: string; kind: "cue" | "loop"; time: number; end?: number; bars?: number; label: string; bar: number; estimated: boolean }
 export interface Phase { name: string; kind: string; time: number; end: number; label: string; bar: number; bars: number }
-export interface TrackDetail extends Track { cues: TrackCue[]; phases: Phase[] }
+export interface Analysis { bpm: number; first_downbeat: number; bar_len: number; n_bars: number; sections: Section[] }
+export interface TrackDetail extends Track { cues: TrackCue[]; phases: Phase[]; analysis: Analysis | null }
 export interface SpotifyCheck { ok: boolean; redirect_uri: string; steps: { name: string; ok: boolean; detail: string; hint?: string }[] }
 
 export interface Finding { kind: string; severity: "high" | "medium" | "info"; index: number; title: string; text: string; track_ids: number[] }
 export interface Changes { added: number; removed: number; moved: boolean }
 
-export interface Lesson { key: string; title: string; bars: number; bpm: number; steps: Step[]; difficulty: number; summary: string; when: string; listen: string; mistakes: string[] }
+export interface Lesson { key: string; title: string; bars: number; bpm: number; steps: Step[]; automation: Automation; difficulty: number; summary: string; when: string; listen: string; mistakes: string[] }
 
 export interface EnrichResult { checked: number; features_found: number; genres_found: number; still_missing: number }

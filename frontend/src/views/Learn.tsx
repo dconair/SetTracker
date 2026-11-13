@@ -1,12 +1,14 @@
 import { CircleDot, Disc3, Gauge, GraduationCap, Hand, Lightbulb, Pause, Play, Shuffle, SlidersHorizontal } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api";
 import { useBeat } from "../beat";
 import { Flx4 } from "../Flx4";
 import { AlignmentDemo, CamelotWheel, PhraseClock, TrackBlueprint } from "../LearnVisuals";
 import { StepTrainer } from "../StepTrainer";
-import type { Lesson } from "../types";
-import { Button, Card, cx, PageHeader } from "../ui";
+import { useStore } from "../store";
+import type { Lesson, TrackDetail, WaveData } from "../types";
+import { Waveform } from "../Waveform";
+import { Button, Card, cx, fmtBpm, inputClass, PageHeader, useAction } from "../ui";
 
 type Tab = "count" | "transitions" | "keys" | "controller" | "tips";
 const TABS: [Tab, string, React.ReactNode][] = [
@@ -44,20 +46,89 @@ export function Learn() {
 // ------------------------------------------------------------------ Zählen
 const PHRASE_BARS = 8;
 
+/** Abspiel-Uhr für einen echten Track: zählt Schläge über das erkannte Beatgrid der Datei. */
+function useTrackClock(detail: TrackDetail | null, onBeat: (i: number) => void) {
+  const audio = useRef<HTMLAudioElement | null>(null);
+  const raf = useRef(0);
+  const last = useRef(-999);
+  const [playing, setPlaying] = useState(false);
+  const [time, setTime] = useState(0);
+  const beatLen = detail?.analysis ? detail.analysis.bar_len / 4 : 0.5;
+  const first = detail?.analysis?.first_downbeat ?? 0;
+  const position = useCallback(() => ((audio.current?.currentTime ?? 0) - first) / beatLen, [first, beatLen]);
+
+  const stop = useCallback(() => {
+    cancelAnimationFrame(raf.current);
+    audio.current?.pause();
+    setPlaying(false);
+  }, []);
+  const start = useCallback((from?: number) => {
+    if (!detail) return;
+    if (!audio.current || !audio.current.src.endsWith(`/api/tracks/${detail.id}/audio`)) {
+      audio.current?.pause();
+      audio.current = new Audio(`/api/tracks/${detail.id}/audio`);
+      audio.current.addEventListener("ended", () => setPlaying(false));
+    }
+    if (from !== undefined) audio.current.currentTime = Math.max(0, from);
+    audio.current.play().catch(() => setPlaying(false));
+    setPlaying(true);
+    last.current = -999;
+    const tick = () => {
+      const el = audio.current;
+      if (!el || el.paused) return;
+      setTime(el.currentTime);
+      const i = Math.floor((el.currentTime - first) / beatLen);
+      if (i !== last.current) { last.current = i; onBeat(i); }
+      raf.current = requestAnimationFrame(tick);
+    };
+    raf.current = requestAnimationFrame(tick);
+  }, [detail, first, beatLen, onBeat]);
+  useEffect(() => stop, [stop, detail?.id]);
+  return { playing, start, stop, position, time };
+}
+
 function Counting() {
+  const { tracks, sets } = useStore();
+  const run = useAction();
   const [bpm, setBpm] = useState(124);
   const [beatIndex, setBeatIndex] = useState(-1);
   const [showCount, setShowCount] = useState(true);
   const [signal, setSignal] = useState(true);
-  const [taps, setTaps] = useState<{ off: number; id: number }[]>([]);
-  const beat = useBeat({ bpm, phraseBars: PHRASE_BARS, phraseSignal: signal, onBeat: setBeatIndex });
+  const [taps, setTaps] = useState<{ off: number; id: number; at?: string }[]>([]);
+  const [trackId, setTrackId] = useState<number | null>(null);
+  const [filter, setFilter] = useState("");
+  const [detail, setDetail] = useState<TrackDetail | null>(null);
+  const [wave, setWave] = useState<WaveData | null>(null);
+  const demo = useBeat({ bpm, phraseBars: PHRASE_BARS, phraseSignal: signal, onBeat: setBeatIndex });
+  const real = useTrackClock(detail, setBeatIndex);
+  const useTrack = trackId !== null && detail !== null;
+  const beat = useTrack ? real : demo;
   const phraseBeats = PHRASE_BARS * 4;
+
+  // Nur lokale, fertig analysierte Dateien lassen sich abspielen und zählen
+  const playable = useMemo(() => (tracks ?? []).filter((t) => t.path && t.has_analysis), [tracks]);
+  const shown = useMemo(() => {
+    const words = filter.toLowerCase().split(/\s+/).filter(Boolean);
+    return playable.filter((t) => words.every((w) => `${t.title} ${t.artist}`.toLowerCase().includes(w))).slice(0, 200);
+  }, [playable, filter]);
+  useEffect(() => {
+    demo.stop();
+    setBeatIndex(-1);
+    setTaps([]);
+    setDetail(null);
+    setWave(null);
+    if (trackId === null) return;
+    api.track(trackId).then(setDetail).catch(() => setTrackId(null));
+    api.waveform(trackId).then(setWave).catch(() => {});
+  }, [trackId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const tap = () => {
     if (!beat.playing) return;
     const pos = beat.position();
     const nearest = Math.round(pos / phraseBeats) * phraseBeats;
-    setTaps((t) => [{ off: pos - nearest, id: Date.now() }, ...t].slice(0, 6));
+    // Beginnt an dieser Phrasengrenze ein Abschnitt des Tracks (Drop, Break …)? Dann beim Namen nennen.
+    const section = useTrack ? detail!.analysis?.sections.find((sec) => sec.start_bar * 4 === nearest) : undefined;
+    setTaps((t) => [{ off: pos - nearest, id: Date.now(), at: section?.label }, ...t].slice(0, 6));
   };
   useEffect(() => {
     // Die Leertaste gehört hier allein der Übung: Sie darf nicht nebenbei einen fokussierten
@@ -72,7 +143,17 @@ function Counting() {
 
   const toggle = () => {
     (document.activeElement as HTMLElement | null)?.blur();
-    if (beat.playing) { beat.stop(); setBeatIndex(-1); } else { setTaps([]); beat.start(); }
+    if (beat.playing) { beat.stop(); if (!useTrack) setBeatIndex(-1); } else { setTaps([]); beat.start(); }
+  };
+  const jumpBefore = (sectionStart: number) => {
+    if (!detail?.analysis) return;
+    setTaps([]);
+    real.start(sectionStart - 8 * detail.analysis.bar_len);   // 8 Takte Anlauf: eine Phrase mitzählen, dann kommt der Wechsel
+  };
+  const shiftGrid = async (beats: 1 | -1) => {
+    if (!detail) return;
+    const next = await run(() => api.gridShift(detail.id, beats), "Raster verschoben");
+    if (next) { setDetail({ ...detail, analysis: next.analysis }); api.waveform(detail.id).then(setWave).catch(() => {}); }
   };
   const beatInBar = beatIndex < 0 ? -1 : beatIndex % 4;
   const barInPhrase = beatIndex < 0 ? -1 : Math.floor(beatIndex / 4) % PHRASE_BARS;
@@ -90,16 +171,54 @@ function Counting() {
     <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
       <div className="space-y-5">
         <Card className="p-5">
-          <div className="flex flex-wrap items-center gap-4">
-            <Button variant="primary" icon={beat.playing ? <Pause size={16} /> : <Play size={16} />} onClick={toggle}>{beat.playing ? "Stopp" : "Übungs-Beat starten"}</Button>
-            <label className="flex items-center gap-3 text-[13px] text-muted">
-              Tempo
-              <input type="range" min={90} max={176} step={1} value={bpm} onChange={(e) => setBpm(Number(e.target.value))} className="w-36 accent-(--accent)" aria-label="Tempo in BPM" />
-              <span className="num w-16 font-mono text-text">{bpm} BPM</span>
-            </label>
-            <Check checked={showCount} onChange={setShowCount}>Zähler anzeigen</Check>
-            <Check checked={signal} onChange={setSignal}>Becken zum Phrasenbeginn</Check>
+          <div className="mb-4 flex flex-wrap items-end gap-3 border-b border-line pb-4">
+            <div className="min-w-0 flex-1">
+              <div className="mb-1.5 text-xs font-medium tracking-wide text-muted uppercase">Womit üben?</div>
+              {playable.length === 0 ? (
+                <p className="text-[13px] text-muted">Zum Zählen mit echten Tracks braucht SetTracker die Audiodatei: Füge in der Bibliothek einen Musikordner hinzu. Reine Spotify-Tracks lassen sich hier nicht abspielen. Bis dahin läuft der Übungs-Beat.</p>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="Track suchen …" className={cx(inputClass, "w-44")} aria-label="Track suchen" />
+                  <select value={trackId ?? ""} onChange={(e) => setTrackId(e.target.value ? Number(e.target.value) : null)} className={cx(inputClass, "min-w-0 max-w-full flex-1 cursor-pointer")} aria-label="Track zum Üben">
+                    <option value="">Übungs-Beat (ohne Track)</option>
+                    {shown.map((t) => <option key={t.id} value={t.id}>{t.artist ? `${t.artist} – ` : ""}{t.title} · {fmtBpm(t.bpm)} BPM</option>)}
+                  </select>
+                </div>
+              )}
+            </div>
+            {sets.length > 0 && playable.length > 0 && <span className="text-xs text-faint">{playable.length} Tracks mit Audiodatei verfügbar</span>}
           </div>
+          <div className="flex flex-wrap items-center gap-4">
+            <Button variant="primary" icon={beat.playing ? <Pause size={16} /> : <Play size={16} />} onClick={toggle} disabled={trackId !== null && !detail}>{beat.playing ? "Stopp" : useTrack ? "Track abspielen" : "Übungs-Beat starten"}</Button>
+            {useTrack ? (
+              <span className="text-[13px] text-muted">Tempo des Tracks: <b className="num font-mono font-medium text-text">{fmtBpm(detail!.bpm)} BPM</b></span>
+            ) : (
+              <label className="flex items-center gap-3 text-[13px] text-muted">
+                Tempo
+                <input type="range" min={90} max={176} step={1} value={bpm} onChange={(e) => setBpm(Number(e.target.value))} className="w-36 accent-(--accent)" aria-label="Tempo in BPM" />
+                <span className="num w-16 font-mono text-text">{bpm} BPM</span>
+              </label>
+            )}
+            <Check checked={showCount} onChange={setShowCount}>Zähler anzeigen</Check>
+            {!useTrack && <Check checked={signal} onChange={setSignal}>Becken zum Phrasenbeginn</Check>}
+          </div>
+          {useTrack && wave && detail?.analysis && (
+            <div className="mt-4">
+              <div className="cursor-pointer" title="Klicken zum Springen" onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); real.start(((e.clientX - r.left) / r.width) * wave.duration); }}>
+                <Waveform data={wave} height={84} cursor={real.time} />
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+                <span className="text-muted">8 Takte vor …</span>
+                {detail.analysis.sections.filter((sec) => sec.start_bar >= 8).map((sec) => (
+                  <button key={sec.start} onClick={() => jumpBefore(sec.start)} className="h-7 rounded-full border border-line px-2.5 font-medium text-muted hover:bg-hover hover:text-text">{sec.label} (Takt {sec.start_bar + 1})</button>
+                ))}
+                <span className="ml-auto flex items-center gap-1.5 text-faint">Eins liegt daneben?
+                  <button onClick={() => shiftGrid(-1)} className="h-7 rounded-md border border-line px-2 hover:bg-hover hover:text-text" title="Raster einen Schlag früher">◀ Schlag</button>
+                  <button onClick={() => shiftGrid(1)} className="h-7 rounded-md border border-line px-2 hover:bg-hover hover:text-text" title="Raster einen Schlag später">Schlag ▶</button>
+                </span>
+              </div>
+            </div>
+          )}
 
           <div className="mt-6 grid grid-cols-1 items-center gap-6 md:grid-cols-[minmax(0,1fr)_220px]">
           <div>
@@ -124,7 +243,7 @@ function Counting() {
                 </div>
               ))}
             </div>
-            <p className="mt-3 text-xs text-faint">4 Schläge = 1 Takt · 8 Takte = 1 Phrase (32 Schläge). Der Basston des Übungs-Beats wechselt mit jeder Phrase.</p>
+            <p className="mt-3 text-xs text-faint">4 Schläge = 1 Takt · 8 Takte = 1 Phrase (32 Schläge). {useTrack ? "Gezählt wird ab der erkannten ersten Eins des Tracks; stimmt die Betonung nicht, verschiebe das Raster um einen Schlag." : "Der Basston des Übungs-Beats wechselt mit jeder Phrase."}</p>
           </div>
           <div className="flex justify-center"><PhraseClock beatIndex={beatIndex} bars={PHRASE_BARS} hidden={!showCount} /></div>
           </div>
@@ -145,7 +264,7 @@ function Counting() {
                 return (
                   <li key={t.id} className={cx("flex items-center gap-3 rounded-lg px-3 py-2 text-[13px]", i === 0 ? "bg-hover" : "opacity-60")}>
                     <span className="h-2 w-2 rounded-full" style={{ background: v.color }} />
-                    <span className="flex-1 font-medium" style={{ color: i === 0 ? v.color : undefined }}>{v.text}</span>
+                    <span className="flex-1 font-medium" style={{ color: i === 0 ? v.color : undefined }}>{v.text}{t.at && Math.abs(t.off) <= 1.2 ? ` – hier beginnt: ${t.at}` : ""}</span>
                     <span className="num font-mono text-xs text-muted">{t.off >= 0 ? "+" : ""}{t.off.toFixed(1)} Schläge</span>
                   </li>
                 );
@@ -236,7 +355,7 @@ function Transitions() {
               <div><div className="mb-0.5 font-semibold">Typische Fehler</div><ul className="list-disc space-y-0.5 pl-4 text-muted">{lesson.mistakes.map((m) => <li key={m}>{m}</li>)}</ul></div>
             </div>
           </Card>
-          <StepTrainer key={lesson.key} steps={lesson.steps} bpm={lesson.bpm} template={lesson.key} bars={lesson.bars} />
+          <StepTrainer key={lesson.key} steps={lesson.steps} bpm={lesson.bpm} automation={lesson.automation} />
         </div>
       )}
     </div>

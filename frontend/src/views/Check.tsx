@@ -2,10 +2,11 @@ import { ArrowLeft, ArrowRight, ArrowRightLeft, Check as CheckIcon, CircleAlert,
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { useStore } from "../store";
-import type { FixOption, Rating, Review, Track } from "../types";
+import type { FixOption, PlanBrief, Rating, Review, Track } from "../types";
 import { Button, Card, cx, Empty, fmtBpm, IconButton, KeyBadge, changesText, moodColor, PageHeader, ScoreBadge, Select, useAction, useToast, verdictColor } from "../ui";
 import { SpotifyDialog, SpotifyLogo } from "./Library";
 import { EnergyChart } from "./SetBuilder";
+import { TransitionPanel } from "./TransitionPanel";
 
 export function Check({ id }: { id: number | null }) {
   return id === null ? <CheckStart /> : <CheckResult id={id} />;
@@ -78,6 +79,7 @@ function CheckResult({ id }: { id: number }) {
   const [orderBy, setOrderBy] = useState("");
   const [sort, setSort] = useState<{ key: "pos" | "bpm" | "key" | "energy" | "mood" | "family"; dir: 1 | -1 }>({ key: "pos", dir: 1 });
   const [refreshing, setRefreshing] = useState(false);
+  const [openTransition, setOpenTransition] = useState<number | null>(null);
   const [pinFirst, setPinFirst] = useState(false);
   const [pinLast, setPinLast] = useState(false);
   const [review, setReview] = useState<Review | null>(null);
@@ -206,12 +208,13 @@ function CheckResult({ id }: { id: number }) {
             <div className="mt-5 flex items-center gap-2.5 rounded-lg bg-hover px-4 py-3 text-[13px]"><CheckIcon size={16} className="text-good" /> Mit diesen Vorgaben gibt es keine bessere Reihenfolge – die Playlist kann so bleiben.</div>
           ) : (
             <div className="mt-5 grid grid-cols-1 gap-5 lg:grid-cols-2">
-              <OrderColumn title="Vorher" rating={review.before} tracks={review.tracks} moved={moved} />
-              <OrderColumn title="Nachher" rating={review.after} tracks={after} moved={moved} highlight />
+              <OrderColumn title="Vorher" rating={review.before} tracks={review.tracks} moved={moved} plans={review.plans_before} onOpen={setOpenTransition} />
+              <OrderColumn title="Nachher" rating={review.after} tracks={after} moved={moved} plans={review.plans_after} highlight />
             </div>
           )}
         </Card>
 
+        {openTransition !== null && <TransitionPanel setId={id} index={openTransition} total={review.tracks.length - 1} onClose={() => { setOpenTransition(null); load(); }} onNavigate={setOpenTransition} />}
         {review.fixes.length > 0 && (
           <section>
             <h2 className="mb-1 font-semibold">Einzelne Problemstellen</h2>
@@ -357,7 +360,7 @@ function Toggle({ checked, onChange, children }: { checked: boolean; onChange: (
   );
 }
 
-function OrderColumn({ title, rating, tracks, moved, highlight }: { title: string; rating: Rating; tracks: Track[]; moved: Set<number>; highlight?: boolean }) {
+function OrderColumn({ title, rating, tracks, moved, highlight, plans, onOpen }: { title: string; rating: Rating; tracks: Track[]; moved: Set<number>; highlight?: boolean; plans: PlanBrief[]; onOpen?: (index: number) => void }) {
   return (
     <div className={cx("rounded-xl border p-3", highlight ? "border-accent/50 bg-accent-soft/40" : "border-line bg-bg")}>
       <div className="mb-1 flex items-center justify-between px-1">
@@ -378,11 +381,15 @@ function OrderColumn({ title, rating, tracks, moved, highlight }: { title: strin
             <KeyBadge camelot={t.camelot} name={t.key_name} />
           </div>
           {i < tracks.length - 1 && rating.transitions[i] && (
-            <div className="ml-[18px] flex items-center gap-2 py-0.5">
-              <span className="h-4 w-0.5 rounded-full" style={{ background: verdictColor[rating.transitions[i].verdict] }} />
-              <span className="num text-[11px] font-semibold" style={{ color: verdictColor[rating.transitions[i].verdict] }}>{Math.round(rating.transitions[i].score * 100)}</span>
-              <span className="truncate text-[11px] text-faint">{(rating.transitions[i].verdict === "bad" ? rating.transitions[i].issues : rating.transitions[i].reasons).join(" · ")}</span>
-            </div>
+            <button disabled={!onOpen} onClick={() => onOpen?.(i)} title={onOpen ? "Übergang mit Waveforms, Reglern und Anleitung öffnen" : plans[i]?.why}
+              className={cx("ml-[18px] flex w-[calc(100%-18px)] items-start gap-2 rounded-md py-1 pr-1 text-left", onOpen && "hover:bg-hover")}>
+              <span className="mt-0.5 h-8 w-0.5 shrink-0 rounded-full" style={{ background: verdictColor[rating.transitions[i].verdict] }} />
+              <span className="num mt-0.5 w-6 shrink-0 text-[11px] font-semibold" style={{ color: verdictColor[rating.transitions[i].verdict] }}>{Math.round(rating.transitions[i].score * 100)}</span>
+              <span className="min-w-0 flex-1">
+                {plans[i] && <span className="block truncate text-[11px] font-medium text-text">{plans[i].title} · {plans[i].bars} Takt{plans[i].bars === 1 ? "" : "e"}{plans[i].out ? ` · raus bei ${plans[i].out} · rein bei ${plans[i].into}` : " · Zeiten nur mit Audiodatei"}</span>}
+                <span className="block truncate text-[11px] text-faint">{(rating.transitions[i].verdict === "bad" ? rating.transitions[i].issues : rating.transitions[i].reasons).join(" · ")}</span>
+              </span>
+            </button>
           )}
         </div>
       ))}
