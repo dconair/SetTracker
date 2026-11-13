@@ -62,67 +62,139 @@ def _prep(plan: dict, a: dict, b: dict) -> list[dict]:
     return steps
 
 
-def steps_for(plan: dict, a: dict, b: dict) -> list[dict]:
-    da, db = plan["deck_a"], plan["deck_b"]
-    bars, t = plan["bars"], plan["template"]
-    if plan["precise"]:
-        at_out = f"Deck {da} bei {plan['mix_out']['label']} (Takt {plan['mix_out']['bar']}, Hot Cue MIX OUT)"
-    else:
-        est = _estimate_out(a, bars)
-        at_out = f"Wenn auf Deck {da} das Outro beginnt" + (f" (geschätzt um {est}, auf einer Eins)" if est else f" (ca. {max(bars, 8)} Takte vor Schluss, auf einer Eins)")
-    steps = _prep(plan, a, b)
-    half = max(bars // 2, 1)
+def clock(v: float) -> str:
+    """Reglerstellung als Uhrzeit: 0 = 7 Uhr (ganz links), 0,5 = 12 Uhr, 1 = 5 Uhr (ganz rechts)."""
+    hour = round(7 + v * 10)
+    return f"{hour - 12 if hour > 12 else hour} Uhr"
 
-    if t == "bass_swap":
-        steps += [
-            _step("Vorbereitung", f"EQ LOW auf Deck {db} ganz nach links (Bass raus), MID und HI auf 12 Uhr.", db, [f"low_{db}"]),
-            _step("Takt 1", f"{at_out}: PLAY auf Deck {db} genau auf die Eins. Im Kopfhörer prüfen, dass die Kicks übereinander liegen; bei Bedarf am Jogwheel-Rand leicht nachschieben.", db, [f"play_{db}", f"jog_{db}"]),
-            _step(f"Takt 1–{half}", f"Kanalfader Deck {db} gleichmäßig bis ganz nach oben schieben.", db, [f"fader_{db}"]),
-            _step(f"Takt {half + 1}", f"Bass-Swap auf der Eins: EQ LOW Deck {da} zügig ganz nach links, gleichzeitig EQ LOW Deck {db} auf 12 Uhr.", None, [f"low_{da}", f"low_{db}"]),
-            _step(f"Takt {half + 1}–{bars}", f"Deck {da} ausdünnen: erst MID auf 9 Uhr, dann Kanalfader Deck {da} langsam herunterziehen.", da, [f"mid_{da}", f"fader_{da}"]),
-            _step(f"Nach Takt {bars}", f"Kanalfader Deck {da} ganz unten, PAUSE. EQ auf Deck {da} wieder auf 12 Uhr stellen.", da, [f"fader_{da}", f"play_{da}", f"low_{da}", f"mid_{da}"]),
-        ]
-    elif t == "filter_fade":
-        steps += [
-            _step("Vorbereitung", f"CFX-Regler Deck {db} auf ca. 9 Uhr (Low-Pass) drehen.", db, [f"cfx_{db}"]),
-            _step("Takt 1", f"{at_out}: PLAY auf Deck {db} auf die Eins, Kanalfader Deck {db} auf etwa 3/4.", db, [f"play_{db}", f"fader_{db}"]),
-            _step(f"Takt 1–{half}", f"CFX Deck {db} langsam zurück auf 12 Uhr, gleichzeitig CFX Deck {da} nach rechts Richtung 3 Uhr (High-Pass) drehen.", None, [f"cfx_{db}", f"cfx_{da}"]),
-            _step(f"Takt {half + 1}–{bars}", f"Kanalfader Deck {db} ganz hoch, Kanalfader Deck {da} herunterziehen.", None, [f"fader_{db}", f"fader_{da}"]),
-            _step(f"Nach Takt {bars}", f"Deck {da} pausieren und CFX Deck {da} zurück auf 12 Uhr.", da, [f"play_{da}", f"cfx_{da}"]),
-        ]
-    elif t == "echo_out":
-        steps += [
-            _step("Vorbereitung", f"BEAT FX: mit BEAT FX SELECT „ECHO“ wählen, Kanalwahlschalter auf {da}, mit BEAT ◀/▶ auf 1/2 Beat, LEVEL/DEPTH auf 12 Uhr.", da,
-                  ["beatfx_select", "beatfx_ch", "beatfx_beat", "beatfx_depth"]),
-            _step("Takt 1", f"{at_out}: BEAT FX ON/OFF drücken – Deck {da} bekommt ein Echo.", da, ["beatfx_onoff"]),
-            _step(f"Takt {max(bars, 1)}", f"Auf der letzten Zählzeit den Kanalfader Deck {da} schnell schließen – das Echo klingt aus.", da, [f"fader_{da}"]),
-            _step(f"Takt {max(bars, 1) + 1}", f"Genau auf die nächste Eins PLAY auf Deck {db} mit Kanalfader oben.", db, [f"play_{db}", f"fader_{db}"]),
-            _step("Danach", f"BEAT FX wieder ausschalten, Deck {da} pausieren.", da, ["beatfx_onoff", f"play_{da}"]),
-        ]
-    elif t == "loop_out":
-        steps += [
-            _step("Vorbereitung", f"EQ LOW auf Deck {db} ganz nach links.", db, [f"low_{db}"]),
-            _step("Takt 1", f"{at_out}: 4 BEAT/EXIT auf Deck {da} drücken – der letzte volle Takt läuft als Schleife weiter.", da, [f"loop4_{da}"]),
-            _step("Takt 1", f"PLAY auf Deck {db} auf die Eins, Kanalfader Deck {db} über {half} Takte hochziehen.", db, [f"play_{db}", f"fader_{db}"]),
-            _step(f"Takt {half + 1}", f"Bass-Swap: EQ LOW Deck {da} raus, EQ LOW Deck {db} auf 12 Uhr.", None, [f"low_{da}", f"low_{db}"]),
-            _step(f"Takt {half + 1}–{bars}", f"Kanalfader Deck {da} herunterziehen; optional mit CUE/LOOP CALL ◀ die Schleife halbieren für einen Spannungsaufbau.", da, [f"fader_{da}", f"loopcall_{da}"]),
-            _step(f"Nach Takt {bars}", f"Deck {da} pausieren, Loop mit 4 BEAT/EXIT beenden, EQ zurück auf 12 Uhr.", da, [f"play_{da}", f"loop4_{da}", f"low_{da}"]),
-        ]
-    elif t == "cut":
-        steps += [
-            _step("Vorbereitung", f"Kanalfader Deck {db} ganz oben lassen, Crossfader ganz auf die Seite von Deck {da}.", db, [f"fader_{db}", "crossfader"]),
-            _step("Takt 1", f"{at_out}: letzten Takt mitzählen (1-2-3-4).", da, []),
-            _step("Die Eins", f"Auf die nächste Eins PLAY auf Deck {db} und Crossfader in einem Zug auf die Seite von Deck {db}.", db, [f"play_{db}", "crossfader"]),
-            _step("Danach", f"Deck {da} pausieren und Crossfader zurück in die Mitte, sobald Kanalfader Deck {da} unten ist.", da, [f"play_{da}", "crossfader", f"fader_{da}"]),
-        ]
-    elif t == "smart_fader":
-        steps += [
-            _step("Vorbereitung", "SMART FADER-Taste drücken (leuchtet). rekordbox gleicht Tempo, Bass und Lautstärke beim Überblenden automatisch an.", None, ["smart_fader"]),
-            _step("Takt 1", f"{at_out}: PLAY auf Deck {db} auf die Eins.", db, [f"play_{db}"]),
-            _step(f"Takt 1–{bars}", f"Crossfader gleichmäßig über {bars} Takte von Deck {da} zu Deck {db} schieben.", None, ["crossfader"]),
-            _step(f"Nach Takt {bars}", f"Deck {da} pausieren, SMART FADER wieder ausschalten und Crossfader in die Mitte.", da, [f"play_{da}", "smart_fader", "crossfader"]),
-            _step("Alternative", f"Ohne Smart Fader: Echo-Out auf Deck {da} und „{b['title']}“ frisch auf der Eins starten.", None, ["beatfx_onoff", f"play_{db}"]),
-        ]
+
+def _fader(v: float) -> str:
+    return "ganz unten" if v <= 0.02 else "ganz oben" if v >= 0.98 else f"auf etwa {round(v * 10)} von 10"
+
+
+_KNOB = {"low": "EQ LOW", "mid": "EQ MID", "hi": "EQ HI", "cfx": "CFX"}
+
+
+def _describe(lane: str, v0: float, v1: float, jump: bool, da: int, db: int) -> tuple[str, str]:
+    """(Anweisung, Warum) für die Bewegung eines Reglers."""
+    if lane == "crossfader":
+        side = lambda v: f"ganz auf die Seite von Deck {da}" if v <= 0.02 else f"ganz auf die Seite von Deck {db}" if v >= 0.98 else "in die Mitte"  # noqa: E731
+        how = "in einem Zug" if jump else "gleichmäßig"
+        return f"Crossfader {how} von {side(v0).replace('ganz auf die Seite von ', '')} {side(v1)} schieben", "Der Crossfader blendet zwischen beiden Decks; beide Kanalfader bleiben offen."
+    name, side = lane.rsplit("_", 1)
+    deck = da if side == "a" else db
+    if name == "fader":
+        if jump:
+            return f"Kanalfader Deck {deck} sofort {_fader(v1)}", "Schneller Wechsel genau auf den Schlag."
+        verb = "hochschieben" if v1 > v0 else "herunterziehen"
+        why = "Der neue Track wird hörbar – noch ohne Bass, damit nichts matscht." if side == "b" else "Der alte Track geht raus, sobald nichts Tragendes mehr von ihm kommt."
+        pos = lambda v: _fader(v).replace("auf ", "")  # noqa: E731
+        return f"Kanalfader Deck {deck} gleichmäßig von {pos(v0)} nach {pos(v1)} {verb}", why
+    knob = _KNOB[name]
+    move = f"{knob} Deck {deck} {'in einem Zug' if jump else 'langsam'} von {clock(v0)} auf {clock(v1)}"
+    if name == "low":
+        return move, "Nur ein Bass gleichzeitig: Der Tausch auf der Eins klingt wie ein Wechsel im Track selbst."
+    if name == "hi":
+        return move, "Die Höhen (Hi-Hats, Becken) wechseln zuerst – das fällt am wenigsten auf."
+    if name == "mid":
+        return move, "Mitten tragen Melodie und Gesang: Der alte Track tritt zurück, sobald der neue führt."
+    if v1 == 0.5 or (v0 < 0.5 and v1 > v0):
+        return move, "Der Filter öffnet sich – der Track wirkt, als käme er näher."
+    return move, "Der Filter nimmt dem alten Track den Bass und Körper; er wird dünner und macht Platz."
+
+
+def _events(curves: dict) -> list[dict]:
+    """Zerlegt die Kurven in Bewegungen: {b0, b1, lane, v0, v1}."""
+    out = []
+    for lane, pts in curves.items():
+        if lane in ("echo", "loop"):
+            continue
+        for (b0, v0), (b1, v1) in zip(pts, pts[1:]):
+            if abs(v1 - v0) > 1e-6:
+                out.append({"b0": b0, "b1": b1, "lane": lane, "v0": v0, "v1": v1})
+    return sorted(out, key=lambda e: (e["b0"], e["b1"], e["lane"]))
+
+
+def _when(b0: float, b1: float) -> str:
+    if 0 < b1 - b0 < 1:  # kurze Bewegung am Taktende, z. B. Fader schließen vor dem Neustart
+        return f"Takt {int(b0) + 1} (letzter Schlag)"
+    if b0 == b1:
+        return f"Takt {int(b0) + 1} (auf die Eins)"
+    last = int(b1) if float(b1).is_integer() else int(b1) + 1
+    return f"Takt {int(b0) + 1}–{last}" if last > int(b0) + 1 else f"Takt {int(b0) + 1}"
+
+
+def steps_for(plan: dict, a: dict, b: dict) -> list[dict]:
+    """Bedienschritte aus der Regler-Automation des Plans – Text und Animation stimmen dadurch überein."""
+    from . import automation
+
+    da, db = plan["deck_a"], plan["deck_b"]
+    t, n = plan["template"], max(plan["bars"], 1)
+    curves = automation.recipe(t, n)
+    ctrl = lambda lane: automation.control_id(lane, da, db)  # noqa: E731
+    if plan["precise"]:
+        at_out = f"Deck {da} erreicht {plan['mix_out']['label']} (Takt {plan['mix_out']['bar']}, Hot Cue MIX OUT)"
+    else:
+        est = _estimate_out(a, n)
+        at_out = f"Auf Deck {da} beginnt das Outro" + (f" (geschätzt um {est})" if est else f" (ca. {max(n, 8)} Takte vor Schluss)")
+    steps = _prep(plan, a, b)
+
+    # Ausgangsstellungen für Deck B, die von der Mittelstellung abweichen
+    start = [(lane, pts[0][1]) for lane, pts in curves.items() if lane.endswith("_b") and not lane.startswith("fader") and abs(pts[0][1] - 0.5) > 1e-6]
+    if start:
+        text = ", ".join(f"{_KNOB[lane.rsplit('_', 1)[0]]} auf {clock(v)}" for lane, v in start)
+        why = "So kommt der neue Track ohne Bass bzw. gedämpft herein und stört den laufenden nicht."
+        steps.append({**_step("Vorbereitung", f"Deck {db} einstellen: {text}. Alle übrigen EQ-Regler auf 12 Uhr.", db, [ctrl(lane) for lane, _ in start]), "why": why})
+    if "echo" in curves:
+        steps.append({**_step("Vorbereitung", f"BEAT FX: mit BEAT FX SELECT „ECHO“ wählen, Kanalwahlschalter auf {da}, mit BEAT ◀/▶ auf 1/2 Beat, LEVEL/DEPTH auf 12 Uhr.", da,
+                              ["beatfx_select", "beatfx_ch", "beatfx_beat", "beatfx_depth"]), "why": "Das Echo wird vorbereitet, aber erst im Übergang eingeschaltet."})
+    if t == "smart_fader":
+        steps.append({**_step("Vorbereitung", f"SMART FADER drücken (leuchtet), Crossfader ganz auf die Seite von Deck {da}, beide Kanalfader oben.", None, ["smart_fader", "crossfader"]),
+                      "why": "Die Automatik gleicht Tempo, Bass und Lautstärke an – nötig, weil die Tempi zu weit auseinanderliegen."})
+    if t == "cut":
+        steps.append({**_step("Vorbereitung", f"Crossfader ganz auf die Seite von Deck {da}, Kanalfader Deck {db} ganz oben.", None, ["crossfader", f"fader_{db}"]),
+                      "why": "Deck B ist spielbereit, aber durch den Crossfader noch stumm."})
+
+    if t == "cut":
+        steps.append({**_step("Takt 1", f"{at_out}: den letzten Takt laut mitzählen – 1, 2, 3, 4.", da, []),
+                      "why": "Der Schnitt muss exakt auf die nächste Eins fallen; Mitzählen ist dafür die sicherste Methode."})
+    b_start = n if t in ("echo_out", "cut") else 0
+    start_when = "Takt 1 (auf die Eins)" if b_start == 0 else f"Takt {b_start + 1} (auf die Eins)"
+    if "echo" in curves:
+        steps.append({**_step("Takt 1 (auf die Eins)", f"{at_out}: BEAT FX ON/OFF drücken – Deck {da} bekommt ein Echo.", da, ["beatfx_onoff"]),
+                      "why": "Das Echo füllt die Lücke, wenn der Fader gleich zugeht."})
+    if "loop" in curves:
+        steps.append({**_step("Takt 1 (auf die Eins)", f"{at_out}: 4 BEAT/EXIT auf Deck {da} drücken – der letzte volle Takt läuft als Schleife.", da, [f"loop4_{da}"]),
+                      "why": "Der Loop verlängert den Track, damit genug Zeit zum Überblenden bleibt."})
+    play_text = f"PLAY auf Deck {db} genau auf die Eins" + (f" – {at_out[0].lower() + at_out[1:]}." if b_start == 0 and "echo" not in curves and "loop" not in curves else ".")
+    play = {**_step(start_when, play_text + (" Im Kopfhörer prüfen, dass die Kicks übereinander liegen; sonst am Jogwheel-Rand nachschieben." if b_start == 0 else ""), db, [f"play_{db}"] + ([f"jog_{db}"] if b_start == 0 else [])),
+            "why": "Der Start auf der Eins einer neuen Phrase legt die Wechsel beider Tracks übereinander."}
+
+    grouped: dict[tuple, list[dict]] = {}
+    for e in _events(curves):
+        grouped.setdefault((e["b0"], e["b1"]), []).append(e)
+    moves = []
+    for (b0, b1), group in sorted(grouped.items()):
+        parts = [_describe(e["lane"], e["v0"], e["v1"], b0 == b1, da, db) for e in group]
+        if 0 < b1 - b0 < 1:
+            parts = [(text.replace("gleichmäßig", "zügig"), why) for text, why in parts]
+        decks = {da if e["lane"].endswith("_a") else db for e in group if e["lane"] != "crossfader"}
+        text = "; gleichzeitig ".join(p[0] for p in parts) + "."
+        moves.append({**_step(_when(b0, b1), text, decks.pop() if len(decks) == 1 else None, [ctrl(e["lane"]) for e in group]), "why": parts[0][1], "_bar": b0})
+    # PLAY von Deck B an der richtigen Stelle einsortieren
+    before = [m for m in moves if m["_bar"] < b_start]
+    after = [m for m in moves if m["_bar"] >= b_start]
+    steps += before + [play] + after
+    for m in moves:
+        m.pop("_bar")
+
+    end = [f"play_{da}"] + [ctrl(lane) for lane in curves if lane.endswith("_a") and not lane.startswith("fader")]
+    tidy = "EQ und CFX von Deck " + str(da) + " zurück auf 12 Uhr" + (", BEAT FX aus" if "echo" in curves else "") + (", Loop mit 4 BEAT/EXIT verlassen" if "loop" in curves else "") + (", SMART FADER aus" if t == "smart_fader" else "")
+    steps.append({**_step("Danach" if b_start else f"Nach Takt {n}", f"Deck {da} pausieren. {tidy} – das Deck ist frei für den nächsten Track.", da,
+                          end + (["beatfx_onoff"] if "echo" in curves else []) + ([f"loop4_{da}"] if "loop" in curves else []) + (["smart_fader"] if t == "smart_fader" else [])),
+                  "why": "Zurückgestellte Regler verhindern, dass der nächste Track versehentlich ohne Bass oder mit Filter startet."})
+    for st in steps:
+        st.setdefault("why", "")
     if not plan["precise"]:
-        steps.append(_step("Hinweis", "Mindestens einer der beiden Tracks liegt nur bei Spotify vor – ohne Audiodatei gibt es keine taktgenauen Marken. Zeitangaben sind Schätzungen aus Tempo und Länge; Mix-Punkte bitte nach Gehör und Waveform in rekordbox setzen."))
+        steps.append({**_step("Hinweis", "Mindestens einer der beiden Tracks liegt nur bei Spotify vor – ohne Audiodatei gibt es keine taktgenauen Marken. Zeitangaben sind Schätzungen aus Tempo und Länge; Mix-Punkte bitte nach Gehör und Waveform in rekordbox setzen."), "why": ""})
     return steps

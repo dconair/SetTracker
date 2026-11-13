@@ -71,28 +71,62 @@ def test_suggest_prefers_compatible_tracks(lib):
 
 
 def test_transition_templates(lib):
-    blend = transitions.plan(lib["Warehouse Jack"], lib["Steel Tunnel"], template="bass_swap")
+    blend = transitions.plan(lib["Warehouse Jack"], lib["Steel Tunnel"], template="blend")
     assert blend["bars"] == 16 and blend["precise"]
     assert blend["mix_out"]["bar"] == 53  # Outro beginnt nach 52 Takten
     assert {c["name"] for c in blend["cues_a"]} == {"MIX OUT", "BASS SWAP"}
     assert blend["cues_b"][0]["name"] == "MIX IN" and blend["cues_b"][1]["name"] == "DROP"
-    assert any("EQ LOW" in s["text"] for s in blend["steps"])
+    swap = next(s for s in blend["steps"] if "EQ LOW Deck 1" in s["text"])
+    assert swap["when"] == "Takt 9 (auf die Eins)" and "von 12 Uhr auf 7 Uhr" in swap["text"] and swap["why"]
+    assert set(swap["controls"]) == {"low_1", "low_2"} and swap["bar_from"] == 9
 
     auto = transitions.plan(lib["Morning Light"], lib["Rooftop Groove"])
-    assert auto["template"] == "bass_swap" and auto["bars"] == 8
+    assert auto["template"] == "rise" and auto["bars"] == 8          # 8 Takte Outro/Intro, Nachbartonart
     assert auto["tempo"]["target_bpm"] == 120 and auto["tempo"]["in_range"]
+    long_blend = transitions.plan(lib["Warehouse Jack"], lib["Peak Pressure"])
+    assert long_blend["suggested"] in ("blend", "rise", "fade")
 
     jump = transitions.plan(lib["Rooftop Groove"], lib["Liquid Sky"], deck_a=2)
     assert jump["template"] == "smart_fader" and jump["deck_b"] == 1 and jump["tempo"] is None
-    clash = transitions.plan(lib["Warehouse Jack"], lib["Peak Pressure"], template="echo_out")
-    assert any("ECHO" in s["text"] for s in clash["steps"])
+    echo = transitions.plan(lib["Warehouse Jack"], lib["Peak Pressure"], template="echo_out")
+    assert any("ECHO" in s["text"] for s in echo["steps"]) and echo["automation"]["b_start_bar"] == 2
+    assert transitions.plan(lib["Morning Light"], lib["Rooftop Groove"], template="filter_fade")["template"] == "rise"  # alte Vorlage
+
+
+def test_automation_is_consistent_for_every_template():
+    from settracker.engine import automation, flx4
+
+    for template in transitions.TEMPLATES:
+        for bars in (1, 2, 4, 8, 16, 32):
+            auto = automation.build(template, bars, 1, 2)
+            for cid, pts in auto["controls"].items():
+                assert all(0 <= v <= 1 for _, v in pts), (template, cid)
+                assert [b for b, _ in pts] == sorted(b for b, _ in pts), (template, cid)
+                assert 0 <= pts[0][0] and pts[-1][0] <= bars, (template, cid)
+            # Bass-Regel: nie beide Bässe gleichzeitig voll offen, solange beide Kanäle hörbar sind
+            curves = automation.recipe(template, bars)
+            if "low_a" in curves and "low_b" in curves:
+                for step in range(bars * 4 + 1):
+                    bar = step / 4
+                    both = automation.value_at(curves["low_a"], bar) >= 0.5 and automation.value_at(curves["low_b"], bar) >= 0.5
+                    assert not both or bar == bars / 2, (template, bars, bar)
+    assert automation.value_at([[0, 0], [4, 1]], 1) == 0.25 and automation.value_at([[0, 1], [2, 1], [2, 0]], 2) == 0
+    assert flx4.clock(0) == "7 Uhr" and flx4.clock(0.5) == "12 Uhr" and flx4.clock(1) == "5 Uhr" and flx4.clock(0.2) == "9 Uhr"
+
+    # Jede Reglerbewegung der Automation taucht als Schritt mit denselben Bedienelementen auf
+    a = {"title": "A", "artist": "", "bpm": 124.0, "duration": 0, "analysis": None}
+    for template in transitions.TEMPLATES:
+        plan = transitions.plan(a, {**a, "title": "B"}, template=template)
+        moved = {cid for cid, pts in plan["automation"]["controls"].items() if len({v for _, v in pts}) > 1}
+        named = {c for s in plan["steps"] if s["bar_from"] for c in s["controls"]}
+        assert moved <= named, (template, moved - named)
 
 
 def test_transition_without_audio_is_generic(lib):
     spotify_only = {"id": 99, "title": "Stream", "artist": "X", "bpm": 124, "camelot": "8A", "energy": 0.6, "analysis": None}
     plan = transitions.plan(lib["Rooftop Groove"], spotify_only)
     assert not plan["precise"] and "mix_out" not in plan and plan["cues_a"] == []
-    assert plan["steps"][-1]["when"] == "Hinweis"
+    assert plan["steps"][-1]["when"] == "Hinweis" and plan["automation"]["controls"]
 
 
 def test_track_cues_label_phases_and_loops(lib):
@@ -178,3 +212,21 @@ def test_steps_carry_bar_ranges_and_tutorial_lessons():
         assert all(s["when"] != "Hinweis" for s in lesson["steps"])
         assert any(s["bar_from"] for s in lesson["steps"]) and any(s["controls"] for s in lesson["steps"])
         assert "Track B" in lesson["steps"][0]["text"]
+
+
+def test_fixed_sort_orders_and_tempo_plausibility():
+    from settracker.music import tempo_check
+
+    tracks = [_t(1, 128, "9A", 0.8, 0.5), _t(2, 120, "2B", 0.3, 0.5), _t(3, None, None, None, None), _t(4, 124, "2A", 0.5, 0.5)]
+    assert review.sorted_order(tracks, "bpm") == [1, 3, 0, 2]          # ohne Wert ans Ende
+    assert review.sorted_order(tracks, "energy") == [1, 3, 0, 2]
+    assert review.sorted_order(tracks, "key") == [3, 1, 0, 2]          # 2A, 2B, 9A
+    assert review.sorted_order(tracks, "bpm", pinned={0}) == [0, 1, 3, 2]
+    r = review.review(tracks, [], order_by="bpm")
+    assert [t for t in r["order"]] == [2, 4, 1, 3] and r["recommend_rebuild"]
+
+    assert tempo_check(124, "House") is None and tempo_check(124, "") is None
+    assert tempo_check(87, "Drum & Bass")["suggest"] == 174
+    assert tempo_check(248, "House")["suggest"] == 124
+    odd = tempo_check(106.56, "Drum & Bass")
+    assert odd["suggest"] is None and "160–182" in odd["text"]

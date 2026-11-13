@@ -21,6 +21,10 @@ export interface Track {
   error: string | null;
   collections: string[];
   has_analysis: boolean;
+  data_source: string;
+  estimated: boolean;
+  incomplete: boolean;
+  bpm_hint: { suggest: number | null; text: string } | null;
   intro_bars?: number;
   outro_bars?: number;
 }
@@ -120,6 +124,8 @@ export interface Review {
   mood_gain: number;
   spotify_playlist_id: string | null;
   focus_options: Record<string, string>;
+  order_options: Record<string, string>;
+  order_by: string;
 }
 
 export interface Status {
@@ -128,7 +134,7 @@ export interface Status {
   spotify: {
     configured: boolean;
     user: { name: string; id: string } | null;
-    job: { running: boolean; phase: string; done: number; total: number; message: string };
+    job: { running: boolean; phase: string; done: number; total: number; message: string; result: EnrichResult | null };
     redirect_uri: string;
   };
   families: string[];
@@ -147,3 +153,5 @@ export interface Finding { kind: string; severity: "high" | "medium" | "info"; i
 export interface Changes { added: number; removed: number; moved: boolean }
 
 export interface Lesson { key: string; title: string; bars: number; bpm: number; steps: Step[]; difficulty: number; summary: string; when: string; listen: string; mistakes: string[] }
+
+export interface EnrichResult { checked: number; features_found: number; genres_found: number; still_missing: number }

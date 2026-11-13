@@ -49,9 +49,9 @@ def test_set_flow(api, lib, demo_set):
 
     tr = api.get(f"/api/sets/{sid}/transition/1").json()
     assert tr["plan"]["steps"] and tr["plan"]["deck_a"] == 2
-    forced = api.get(f"/api/sets/{sid}/transition/1", params={"template": "filter_fade"}).json()
-    assert forced["plan"]["template"] == "filter_fade"
-    assert api.get(f"/api/sets/{sid}/transition/1").json()["plan"]["template"] == "filter_fade"
+    forced = api.get(f"/api/sets/{sid}/transition/1", params={"template": "fade"}).json()
+    assert forced["plan"]["template"] == "fade" and forced["plan"]["automation"]["bars"] == forced["plan"]["bars"]
+    assert api.get(f"/api/sets/{sid}/transition/1").json()["plan"]["template"] == "fade"
     assert api.get(f"/api/sets/{sid}/transition/9").status_code == 404
 
 
@@ -96,7 +96,7 @@ def test_exports_roundtrip(api, lib, demo_set, tmp_path):
 
 def test_spotify_import_links_local_files_and_enriches(lib, monkeypatch):
     monkeypatch.setattr(reccobeats, "features", lambda ids: {"sp_new": {"bpm": 174.0, "camelot": "4A", "energy": 0.9, "valence": 0.4}})
-    monkeypatch.setattr(importer.musicbrainz, "artist_genres", lambda name, isrc=None: ["drum and bass", "liquid funk"])
+    monkeypatch.setattr(importer.musicbrainz, "artist_genres", lambda name, isrc=None, force=False: ["drum and bass", "liquid funk"])
     items = [
         {"spotify_id": "sp_local", "title": "Liquid Sky (Original Mix)", "artist": "Demo Roller", "album": "", "duration": lib["Liquid Sky"]["duration"], "isrc": None},
         {"spotify_id": "sp_new", "title": "Stream Only", "artist": "Somebody", "album": "", "duration": 200, "isrc": "XX1"},
@@ -171,7 +171,7 @@ def test_local_file_takes_over_spotify_entry(api, lib, monkeypatch, tmp_path):
     from settracker import demo, library
 
     monkeypatch.setattr(reccobeats, "features", lambda ids: {i: {"bpm": 99.0, "camelot": "1A", "energy": 0.5, "valence": 0.5} for i in ids})
-    monkeypatch.setattr(importer.musicbrainz, "artist_genres", lambda name, isrc=None: ["house"])
+    monkeypatch.setattr(importer.musicbrainz, "artist_genres", lambda name, isrc=None, force=False: ["house"])
     ids = importer.run_import([_spotify_item("sp_a", "Fresh Cut (Extended Mix)", "New Artist", 61),
                                _spotify_item("sp_b", "Other Song", "Somebody Else", 200)], "Planung", background=False)
     view = api.post("/api/sets", json={"name": "Geplant", "track_ids": ids}).json()
@@ -222,7 +222,7 @@ def test_spotify_playlist_refresh_keeps_set_and_pins(api, lib, monkeypatch):
     from settracker.spotify import client
 
     monkeypatch.setattr(reccobeats, "features", lambda ids: {i: {"bpm": 124.0, "camelot": "8A", "energy": 0.6, "valence": 0.5} for i in ids})
-    monkeypatch.setattr(importer.musicbrainz, "artist_genres", lambda name, isrc=None: [])
+    monkeypatch.setattr(importer.musicbrainz, "artist_genres", lambda name, isrc=None, force=False: [])
     monkeypatch.setattr(importer, "run_import", lambda items, name, background=True, _orig=importer.run_import: _orig(items, name, background=False))
     a, b, c, d = (_spotify_item(f"pl_{x}", f"Song {x}", "Band", 180 + i) for i, x in enumerate("abcd"))
     playlist = {"items": [a, b, c]}
@@ -308,3 +308,65 @@ def test_open_external_only_allows_spotify_and_own_pages(api, monkeypatch):
 def test_bare_callback_explains_itself(api):
     page = api.get("/callback")
     assert page.status_code == 400 and "Rücksprungziel" in page.text and "kein Code" not in page.text
+
+
+def test_enrichment_falls_back_to_preview_and_album_genres(api, lib, monkeypatch):
+    """ReccoBeats kennt den Track nicht, MusicBrainz den Künstler nicht: Deezer springt ein."""
+    from settracker.spotify import deezer
+
+    monkeypatch.setattr(reccobeats, "features", lambda ids: {})
+    monkeypatch.setattr(importer.musicbrainz, "artist_genres", lambda name, isrc=None, force=False: [])
+    hit = {"id": 1, "preview": "https://example.invalid/p.mp3", "album": {"id": 9}}
+    monkeypatch.setattr(deezer, "find", lambda t: hit if t["title"] == "Im Clip" else None)
+    monkeypatch.setattr(deezer, "preview_features", lambda h: {"bpm": 128.0, "camelot": "5A", "energy": 0.7, "valence": 0.4, "loudness": -9.0})
+    monkeypatch.setattr(deezer, "genres", lambda h: ["techno/house"])
+    ids = importer.run_import([_spotify_item("dz_a", "Im Clip", "Wer", 200), _spotify_item("dz_b", "Nirgends", "Niemand", 200)], "Lücken", background=False)
+    found, lost = db.get_tracks(ids)
+    assert found["bpm"] == 128.0 and found["camelot"] == "5A" and found["status"] == "partial"
+    assert found["data_source"] == "Vorhörclip (geschätzt)" and found["family"] == "Techno"
+    assert lost["status"] == "error" and lost["bpm"] is None and "Vorhörclip" in lost["error"]
+
+    # Erneut nachschlagen: Zählung stimmt, einzelner Track meldet das Ergebnis
+    result = importer.enrich(ids, force=True)
+    assert result == {"checked": 1, "features_found": 0, "genres_found": 0, "still_missing": 1}
+    monkeypatch.setattr(deezer, "find", lambda t: hit)
+    again = api.post(f"/api/tracks/{ids[1]}/enrich").json()
+    assert again["found"] == {"features": True, "genres": True} and again["complete"] and again["track"]["bpm"] == 128.0
+
+    # Von Hand korrigieren: Halbtempo verdoppeln, Tonart setzen, ungültige Werte abweisen
+    fixed = api.patch(f"/api/tracks/{ids[0]}", json={"bpm": 64.0, "camelot": "5b"}).json()
+    assert fixed["bpm"] == 64.0 and fixed["camelot"] == "5B" and fixed["data_source"] == "von Hand korrigiert"
+    assert api.patch(f"/api/tracks/{ids[0]}", json={"camelot": "13Z"}).status_code == 400
+    assert api.patch(f"/api/tracks/{ids[0]}", json={"bpm": 9}).status_code == 400
+    assert api.post("/api/library/enrich", json={"ids": ids}).json() == {"queued": 0}
+    for i in ids:
+        db.delete_track(i)
+
+
+def test_musicbrainz_does_not_cache_failures(lib, monkeypatch):
+    """Der Fehler hinter „Knopf tut nichts“: Netzfehler wurden dauerhaft als „keine Genres“ gespeichert."""
+    from settracker.spotify import musicbrainz
+
+    calls = {"n": 0}
+    answers = {"data": None}
+
+    def fake_get(path, **params):
+        calls["n"] += 1
+        return answers["data"]
+
+    monkeypatch.setattr(musicbrainz, "_get", fake_get)
+    assert musicbrainz.artist_genres("Cache Test Artist") == [] and db.kv_get("mb:cache test artist") is None
+    assert musicbrainz.artist_genres("Cache Test Artist") == [] and calls["n"] == 2  # erneut versucht
+
+    answers["data"] = {"artists": []}  # echte Antwort: nichts gefunden -> befristet merken
+    assert musicbrainz.artist_genres("Cache Test Artist") == [] and db.kv_get("mb:cache test artist")["tags"] == []
+    before = calls["n"]
+    assert musicbrainz.artist_genres("Cache Test Artist") == [] and calls["n"] == before  # aus dem Cache
+    answers["data"] = {"artists": [{"name": "Cache Test Artist", "score": 100, "tags": [{"name": "House", "count": 3}]}]}
+    assert musicbrainz.artist_genres("Cache Test Artist", force=True) == ["house"]  # Knopfdruck übergeht leeren Eintrag
+    answers["data"] = None
+    assert musicbrainz.artist_genres("Cache Test Artist") == ["house"]
+
+    db.kv_set("mb:alter eintrag", [])  # Format älterer Versionen: leere Liste = wahrscheinlich Fehler
+    answers["data"] = {"artists": [{"name": "Alter Eintrag", "score": 100, "tags": [{"name": "techno", "count": 1}]}]}
+    assert musicbrainz.artist_genres("Alter Eintrag") == ["techno"]

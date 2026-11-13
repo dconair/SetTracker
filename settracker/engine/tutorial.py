@@ -6,17 +6,31 @@ from . import transitions
 GUIDE = {
     "bass_swap": {
         "difficulty": 2,
-        "summary": "Der Standard-Übergang: Beide Tracks laufen eine Weile gemeinsam, der Bass wechselt in einem Schlag von A nach B.",
+        "summary": "Der Klassiker in zwei Bändern: Beide Tracks laufen gemeinsam, der Bass wechselt in einem Schlag von A nach B.",
         "when": "Tempo ähnlich (bis ca. 6 %), Tonarten verträglich, A hat ein Outro und B ein Intro von mindestens 8 Takten.",
         "listen": "Vor dem Tausch darf nur ein Bass zu hören sein – zwei Bässe gleichzeitig klingen matschig. Der Tausch sitzt, wenn er genau auf die Eins einer neuen Phrase fällt.",
         "mistakes": ["Bass von B schon vor dem Tausch aufgedreht", "Tausch mitten in der Phrase statt auf der Eins", "Kanalfader von A zu früh geschlossen – der Übergang wirkt abgehackt"],
     },
-    "filter_fade": {
+    "fade": {
         "difficulty": 1,
-        "summary": "B kommt gedämpft herein und wird heller, während A über den Filter dünner wird und verschwindet.",
-        "when": "Kurze Überlappung (4–8 Takte) oder Tonarten, die nur mäßig zusammenpassen.",
-        "listen": "Der CFX-Regler in der Mitte ist neutral. Links nimmt er Höhen weg (dumpf), rechts den Bass (dünn). Dreh langsam und gleichmäßig.",
-        "mistakes": ["CFX nach dem Übergang nicht zurück auf 12 Uhr gestellt", "Zu schnell gedreht – der Effekt wird zum Gimmick"],
+        "summary": "Der einfachste Übergang: Ein Track wird leiser, der andere lauter – mit einem Bass-Tausch in der Mitte.",
+        "when": "Kurze Überlappung (4–8 Takte), unterschiedliche Stimmung oder wenn es schnell gehen soll.",
+        "listen": "Beide Fader bewegen sich gegenläufig und gleichmäßig. Achte darauf, dass in der Mitte nicht beide Bässe voll laufen.",
+        "mistakes": ["Beide Fader zu lange gleichzeitig oben – es wird laut und matschig", "Bass-Tausch vergessen"],
+    },
+    "rise": {
+        "difficulty": 2,
+        "summary": "B kommt über den Filter gedämpft herein und öffnet sich, der Bass wechselt auf der Phrasengrenze, A läuft dünn aus.",
+        "when": "8–16 Takte Überlappung und verträgliche Tonarten. Baut Spannung auf – gut vor einem Drop.",
+        "listen": "Der CFX-Regler in der Mitte ist neutral. Links nimmt er Höhen weg (dumpf), rechts den Bass (dünn). Der Bass-Tausch sitzt auf der Eins.",
+        "mistakes": ["CFX nach dem Übergang nicht zurück auf 12 Uhr gestellt", "Filter zu schnell gedreht – der Effekt wird zum Gimmick", "Bass von B schon vor dem Tausch offen"],
+    },
+    "blend": {
+        "difficulty": 3,
+        "summary": "Die nahtlose Variante: Höhen, Mitten und Bass wechseln nacheinander über 16–32 Takte, bis B den Platz von A eingenommen hat.",
+        "when": "Lange Outros/Intros (ab 16 Takten), ähnliches Tempo und passende Tonart – typisch für House und Techno.",
+        "listen": "Immer nur ein Frequenzband auf einmal tauschen: erst Höhen, dann Mitten, zuletzt der Bass auf der Phrasengrenze. Zwischen den Schritten zuhören.",
+        "mistakes": ["Alle drei Bänder gleichzeitig getauscht – dann ist es nur ein Crossfade", "Mitten zu früh getauscht: Melodien beider Tracks reiben sich", "Regler am Ende nicht zurückgestellt"],
     },
     "echo_out": {
         "difficulty": 1,
@@ -57,6 +71,7 @@ def lessons() -> list[dict]:
     for key, title in transitions.TEMPLATES.items():
         plan = transitions.plan(a, b, deck_a=1, template=key)
         steps = [s for s in plan["steps"] if s["when"] != "Hinweis"]
-        out.append({"key": key, "title": title, "bars": plan["bars"], "bpm": 124, "steps": steps, **GUIDE[key]})
+        out.append({"key": key, "title": title, "bars": plan["bars"], "bpm": 124, "steps": steps,
+                    "automation": plan["automation"], **GUIDE[key]})
     out.sort(key=lambda lesson: lesson["difficulty"])
     return out

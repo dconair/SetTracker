@@ -151,16 +151,50 @@ def findings(tracks: list[dict], rating: dict) -> list[dict]:
     return sorted(out, key=lambda f: (order[f["severity"]], f["index"]))
 
 
+ORDER_LABELS = {"bpm": "Nach BPM aufsteigend", "key": "Nach Tonart (Camelot-Rad)", "energy": "Nach Energie aufsteigend"}
+
+
+def sorted_order(tracks: list[dict], order_by: str, pinned: set[int] | None = None) -> list[int]:
+    """Feste Sortierung statt Optimierung. Tracks ohne den Wert landen am Ende; fixe Plätze bleiben."""
+    from ..music import parse_camelot
+
+    def key(i: int):
+        t = tracks[i]
+        if order_by == "bpm":
+            v = t.get("bpm")
+        elif order_by == "energy":
+            v = t.get("energy")
+        else:
+            parsed = parse_camelot(t.get("camelot"))
+            v = None if not parsed else parsed[0] * 2 + (parsed[1] == "B")
+        return (v is None, v or 0, i)
+
+    pinned = pinned or set()
+    free = sorted((i for i in range(len(tracks)) if i not in pinned), key=key)
+    it = iter(free)
+    return [i if i in pinned else next(it) for i in range(len(tracks))]
+
+
 def review(tracks: list[dict], library: list[dict] | None = None, curve: str = "free",
-           pinned: set[int] | None = None, weights: dict | None = None, focus: str = "balanced") -> dict:
-    """Kompletter Check: Befund, Auffälligkeiten, Umbau-Vorschlag mit Vorher/Nachher, Einzel-Eingriffe."""
+           pinned: set[int] | None = None, weights: dict | None = None, focus: str = "balanced",
+           order_by: str | None = None) -> dict:
+    """Kompletter Check: Befund, Auffälligkeiten, Umbau-Vorschlag mit Vorher/Nachher, Einzel-Eingriffe.
+
+    `order_by` ("bpm" | "key" | "energy") ersetzt die Optimierung durch eine feste Sortierung.
+    """
     before = rate(tracks, weights)
-    opt = optimize(tracks, curve, pinned, weights, mood_weight=FOCUS.get(focus, 0.2))
+    if order_by in ORDER_LABELS:
+        opt = {"order": sorted_order(tracks, order_by, pinned)}
+    else:
+        opt = optimize(tracks, curve, pinned, weights, mood_weight=FOCUS.get(focus, 0.2))
     reordered = [tracks[i] for i in opt["order"]]
     after = rate(reordered, weights)
     moved = [tracks[i]["id"] for pos, i in enumerate(opt["order"]) if pos != i]
     mood_gain = (after["mood_score"] or 0) - (before["mood_score"] or 0)
-    worthwhile = bool(moved) and (after["overall"] - before["overall"] >= 0.03 or (mood_gain >= 0.05 and after["overall"] >= before["overall"] - 0.01))
+    if order_by in ORDER_LABELS:  # ausdrücklich gewünschte Sortierung: immer anbieten
+        worthwhile = bool(moved)
+    else:
+        worthwhile = bool(moved) and (after["overall"] - before["overall"] >= 0.03 or (mood_gain >= 0.05 and after["overall"] >= before["overall"] - 0.01))
     return {
         "findings": findings(tracks, before),
         "mood_gain": round(mood_gain, 3),

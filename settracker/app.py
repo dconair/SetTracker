@@ -12,7 +12,7 @@ from pydantic import BaseModel
 from . import config, db, library
 from .engine import compat, cues as cue_engine, review as review_engine, tutorial, sequence, suggest as suggest_engine, transitions
 from .export import cheatsheet, m3u, rekordbox_xml
-from .music import FAMILIES, genre_family, key_name, mood_label
+from .music import FAMILIES, genre_family, key_name, mood_label, tempo_check
 from .spotify import client as spotify, importer, reccobeats
 
 app = FastAPI(title="SetTracker")
@@ -29,6 +29,10 @@ def present(track: dict) -> dict:
     t["has_analysis"] = bool(an) if "has_analysis" not in t else t["has_analysis"]
     t["key_name"] = key_name(t.get("camelot"))
     t["mood"] = mood_label(t.get("energy"), t.get("valence"))
+    hint = tempo_check(t.get("bpm"), t.get("family")) if t.get("data_source") != "von Hand korrigiert" else None
+    t["bpm_hint"] = hint
+    t["estimated"] = (t.get("data_source") or "").startswith("Vorhörclip")
+    t["incomplete"] = importer.incomplete(track) if "status" in track and "genres" in track else False
     if an:
         t["intro_bars"], t["outro_bars"] = compat.section_bars(track, "intro"), compat.section_bars(track, "outro")
     return t
@@ -142,10 +146,25 @@ class TrackPatch(BaseModel):
 
 @app.patch("/api/tracks/{track_id}")
 def patch_track(track_id: int, body: TrackPatch) -> dict:
-    need_track(track_id)
+    t = need_track(track_id)
     fields = body.model_dump(exclude_none=True)
     if "genres" in fields and "family" not in fields:
         fields["family"] = genre_family(fields["genres"])
+    if "family" in fields and "genres" not in fields and not t["genres"]:
+        fields["genres"] = [fields["family"]] if fields["family"] else []
+    if "camelot" in fields:
+        from .music import parse_camelot
+
+        parsed = parse_camelot(fields["camelot"])
+        if not parsed:
+            raise HTTPException(400, "Tonart bitte als Camelot-Code angeben, z. B. 8A oder 11B")
+        fields["camelot"] = f"{parsed[0]}{parsed[1]}"
+    if "bpm" in fields and not 40 <= fields["bpm"] <= 260:
+        raise HTTPException(400, "BPM muss zwischen 40 und 260 liegen")
+    if {"bpm", "camelot"} & set(fields):
+        fields["data_source"] = "von Hand korrigiert"
+        if t["status"] in ("pending", "error") and (fields.get("bpm") or t.get("bpm")):
+            fields.update(status="partial", error=None)
     db.update_track(track_id, **fields)
     return present(need_track(track_id))
 
@@ -223,13 +242,30 @@ def demo() -> dict:
     return library.scan_folder(str(folder))
 
 
-@app.post("/api/library/genres")
-def fill_genres() -> dict:
-    """Fehlende Genres über MusicBrainz nachschlagen (läuft im Hintergrund)."""
-    ids = [t["id"] for t in db.all_tracks() if not t["genres"]]
-    if ids and not importer.status()["running"]:
-        importer.run_genres(ids)
+class Enrich(BaseModel):
+    ids: list[int] | None = None
+
+
+@app.post("/api/library/enrich")
+def enrich_library(body: Enrich) -> dict:
+    """Fehlende Daten (BPM, Tonart, Stimmung, Genre) nachschlagen – läuft im Hintergrund."""
+    pool = db.get_tracks(body.ids) if body.ids else db.all_tracks(light=False)
+    ids = [t["id"] for t in pool if importer.incomplete(t)]
+    if importer.status()["running"]:
+        raise HTTPException(409, "Es läuft bereits ein Nachschlage-Auftrag – bitte kurz warten")
+    if ids:
+        importer.run_enrich(ids)
     return {"queued": len(ids)}
+
+
+@app.post("/api/tracks/{track_id}/enrich")
+def enrich_track(track_id: int) -> dict:
+    """Einen Track sofort erneut nachschlagen (alle Quellen, leere Cache-Einträge werden übergangen)."""
+    need_track(track_id)
+    importer.enrich_features([track_id])
+    found = importer.enrich_one(track_id, force=True)
+    t = need_track(track_id)
+    return {"track": present(t), "found": found, "complete": not importer.incomplete(t)}
 
 
 @app.get("/api/fs")
@@ -555,7 +591,8 @@ def transition(set_id: int, index: int, template: str | None = None) -> dict:
 
 
 @app.get("/api/sets/{set_id}/review")
-def review(set_id: int, curve: str = "free", pin_first: bool = False, pin_last: bool = False, focus: str = "balanced") -> dict:
+def review(set_id: int, curve: str = "free", pin_first: bool = False, pin_last: bool = False, focus: str = "balanced",
+           order_by: str = "") -> dict:
     s = need_set(set_id)
     tracks = set_tracks(s)
     pinned_ids = {i["track_id"] for i in s["items"] if i.get("pinned")}
@@ -566,14 +603,14 @@ def review(set_id: int, curve: str = "free", pin_first: bool = False, pin_last: 
         pinned.add(len(tracks) - 1)
     in_set = {t["id"] for t in tracks}
     lib = [db.get_track(t["id"]) for t in db.all_tracks() if t["id"] not in in_set and t["status"] in ("done", "partial")]
-    result = review_engine.review(tracks, lib, curve, pinned, weights(), focus)
+    result = review_engine.review(tracks, lib, curve, pinned, weights(), focus, order_by or None)
     by_id = {t["id"]: present(t) for t in tracks + lib}
     for fix in result["fixes"]:
         for opt in fix["options"]:
             if opt["kind"] == "bridge":
                 opt["track"] = by_id[opt["track_id"]]
     return {**result, "tracks": [by_id[t["id"]] for t in tracks], "name": s["name"], "pinned": sorted(pinned),
-            "spotify_playlist_id": s.get("spotify_playlist_id"), "focus_options": review_engine.FOCUS_LABELS,
+            "spotify_playlist_id": s.get("spotify_playlist_id"), "focus_options": review_engine.FOCUS_LABELS, "order_options": review_engine.ORDER_LABELS, "order_by": order_by if order_by in review_engine.ORDER_LABELS else "",
             "pending": sum(1 for t in tracks if t["status"] in ("pending", "analyzing"))}
 
 

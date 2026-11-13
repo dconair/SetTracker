@@ -4,11 +4,11 @@ from __future__ import annotations
 import threading
 
 from .. import db
-from ..music import genre_family
-from . import musicbrainz, reccobeats
+from ..music import genre_family, tempo_check
+from . import deezer, musicbrainz, reccobeats
 from .match import same_track
 
-_state = {"running": False, "phase": "", "done": 0, "total": 0, "message": ""}
+_state: dict = {"running": False, "phase": "", "done": 0, "total": 0, "message": "", "result": None}
 _lock = threading.Lock()
 
 
@@ -36,62 +36,106 @@ def upsert(items: list[dict], collection: str) -> list[int]:
     return ids
 
 
+def needs_features(t: dict) -> bool:
+    return t["source"] == "spotify" and (t.get("bpm") is None or t["status"] in ("pending", "error"))
+
+
 def enrich_features(track_ids: list[int]) -> int:
-    """BPM/Tonart/Energie von ReccoBeats für Spotify-Tracks ohne eigene Analyse."""
-    tracks = [t for t in db.get_tracks(track_ids) if t["source"] == "spotify" and t["status"] == "pending" and t["spotify_id"]]
+    """BPM/Tonart/Energie von ReccoBeats (Sammelabfrage) für Spotify-Tracks ohne Daten."""
+    tracks = [t for t in db.get_tracks(track_ids) if needs_features(t) and t["spotify_id"]]
     found = reccobeats.features([t["spotify_id"] for t in tracks])
     for t in tracks:
         fields = found.get(t["spotify_id"])
-        if fields:
-            db.update_track(t["id"], status="partial", **fields)
+        if fields and fields.get("bpm"):
+            db.update_track(t["id"], status="partial", error=None, data_source="ReccoBeats", **fields)
         else:
-            db.update_track(t["id"], status="error", error="Keine Audio-Merkmale bei ReccoBeats gefunden")
+            db.update_track(t["id"], status="error", error="Noch keine Audio-Daten gefunden")
     return len(found)
 
 
-def enrich_genres(track_ids: list[int], progress=None) -> None:
-    """Genre je Track über den ersten Künstler (MusicBrainz) ergänzen."""
-    tracks = [t for t in db.get_tracks(track_ids) if not t["genres"] and t["artist"]]
-    for n, t in enumerate(tracks):
-        if progress:
-            progress(n, len(tracks), t["artist"])
-        genres = musicbrainz.artist_genres(t["artist"].split(",")[0], t.get("isrc"))
+def enrich_one(track_id: int, force: bool = False) -> dict:
+    """Zweite Stufe für einen Track: Vorhörclip (BPM/Tonart/Stimmung) und Genres aus mehreren Quellen.
+
+    Liefert, was neu gefunden wurde: {"features": bool, "genres": bool}.
+    """
+    t = db.get_track(track_id)
+    out = {"features": False, "genres": False}
+    if not t:
+        return out
+    hit = None
+    if needs_features(t):
+        hit = deezer.find(t)
+        fields = deezer.preview_features(hit) if hit else None
+        if fields:
+            db.update_track(track_id, status="partial", error=None, data_source="Vorhörclip (geschätzt)", **fields)
+            out["features"] = True
+        else:
+            db.update_track(track_id, status="error", error="Weder ReccoBeats noch ein Vorhörclip liefern Daten zu diesem Track")
+    if not t["genres"] and t["artist"]:
+        genres = musicbrainz.artist_genres(t["artist"].split(",")[0], t.get("isrc"), force=force)
+        if not genres:
+            hit = hit or deezer.find(t)
+            genres = deezer.genres(hit) if hit else []
         if genres:
-            db.update_track(t["id"], genres=genres, family=genre_family(genres))
+            db.update_track(track_id, genres=genres, family=genre_family(genres))
+            out["genres"] = True
+    # Schätzwert aus dem Clip mit dem Genre abgleichen: eindeutiges Halb-/Doppeltempo gleich korrigieren
+    t = db.get_track(track_id)
+    if t and t["data_source"].startswith("Vorhörclip"):
+        hint = tempo_check(t["bpm"], t["family"])
+        if hint and hint["suggest"]:
+            db.update_track(track_id, bpm=hint["suggest"])
+    return out
+
+
+def incomplete(t: dict) -> bool:
+    """Fehlt diesem Track etwas, das sich nachschlagen lässt?"""
+    return needs_features(t) or (not t["genres"] and bool(t["artist"]))
+
+
+def enrich(track_ids: list[int], force: bool = False) -> dict:
+    """Alle Quellen der Reihe nach; meldet Fortschritt über den Status und zählt das Ergebnis."""
+    tracks = [t for t in db.get_tracks(track_ids) if incomplete(t)]
+    result = {"checked": len(tracks), "features_found": 0, "genres_found": 0, "still_missing": 0}
+    _state.update(phase="Audio-Daten laden", done=0, total=len(tracks), message="ReccoBeats")
+    before = {t["id"] for t in tracks if needs_features(t)}
+    enrich_features([t["id"] for t in tracks])
+    result["features_found"] = sum(1 for t in db.get_tracks(list(before)) if not needs_features(t))
+    _state.update(phase="Fehlende Daten nachschlagen")
+    for n, t in enumerate(tracks):
+        _state.update(done=n, message=f"{t['artist']} – {t['title']}" if t["artist"] else t["title"])
+        found = enrich_one(t["id"], force=force)
+        result["features_found"] += found["features"]
+        result["genres_found"] += found["genres"]
+    result["still_missing"] = sum(1 for t in db.get_tracks([t["id"] for t in tracks]) if incomplete(t))
+    return result
+
+
+def _background(work) -> None:
+    def run() -> None:
+        try:
+            _state.update(running=True, result=None)
+            _state["result"] = work()
+        finally:
+            _state.update(running=False, phase="", message="")
+
+    with _lock:
+        threading.Thread(target=run, daemon=True, name="settracker-enrich").start()
 
 
 def run_import(items: list[dict], collection: str, background: bool = True) -> list[int]:
-    """Import + Anreicherung. Genres laufen (langsam, 1 Anfrage/s) im Hintergrund weiter."""
+    """Import + Anreicherung. Das Nachschlagen läuft (teils langsam) im Hintergrund weiter."""
     ids = upsert(items, collection)
-
-    def work() -> None:
-        try:
-            _state.update(running=True, phase="Audio-Merkmale laden", done=0, total=len(ids), message="")
-            enrich_features(ids)
-            _state.update(phase="Genres ergänzen")
-            enrich_genres(ids, lambda n, total, name: _state.update(done=n, total=total, message=name))
-        finally:
-            _state.update(running=False, phase="", message="")
-
     if background:
-        with _lock:
-            threading.Thread(target=work, daemon=True, name="settracker-spotify").start()
+        _background(lambda: enrich(ids))
     else:
-        work()
+        enrich(ids)
     return ids
 
 
-def run_genres(track_ids: list[int]) -> None:
-    """Nur die Genre-Ergänzung im Hintergrund starten."""
-
-    def work() -> None:
-        try:
-            _state.update(running=True, phase="Genres ergänzen", done=0, total=len(track_ids), message="")
-            enrich_genres(track_ids, lambda n, total, name: _state.update(done=n, total=total, message=name))
-        finally:
-            _state.update(running=False, phase="", message="")
-
-    threading.Thread(target=work, daemon=True, name="settracker-genres").start()
+def run_enrich(track_ids: list[int], force: bool = True) -> None:
+    """Nachschlagen auf Knopfdruck im Hintergrund starten."""
+    _background(lambda: enrich(track_ids, force=force))
 
 
 def status() -> dict:

@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS tracks (
     error TEXT,
     analysis TEXT,                     -- JSON: Beatgrid, Abschnitte, Takt-Energie
     collections TEXT NOT NULL DEFAULT '[]', -- Herkunft: Ordner / Playlist-Namen
+    data_source TEXT NOT NULL DEFAULT '', -- woher BPM/Tonart/Stimmung stammen
     added REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_tracks_spotify ON tracks(spotify_id);
@@ -71,6 +72,8 @@ def conn() -> sqlite3.Connection:
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA journal_mode=WAL")
     c.executescript(SCHEMA)
+    if "data_source" not in {r["name"] for r in c.execute("PRAGMA table_info(tracks)")}:
+        c.execute("ALTER TABLE tracks ADD COLUMN data_source TEXT NOT NULL DEFAULT ''")
     if "spotify_playlist_id" not in {r["name"] for r in c.execute("PRAGMA table_info(sets)")}:
         c.execute("ALTER TABLE sets ADD COLUMN spotify_playlist_id TEXT")  # Datenbanken älterer Versionen
     _local.conn, _local.path = c, path

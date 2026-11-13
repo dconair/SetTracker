@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { api } from "./api";
 import type { SetInfo, Status, Track } from "./types";
+import { useToast } from "./ui";
 
 interface Store {
   status: Status | null;
@@ -35,6 +36,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
   const [detailId, openTrack] = useState<number | null>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
   const busy = useRef(false);
+  const jobRunning = useRef(false);
+  const toast = useToast();
   const lastSignature = useRef<string | null>(null);
 
   const refreshTracks = useCallback(async () => setTracks(await api.tracks()), []);
@@ -52,8 +55,16 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       await refreshTracks();
       setDataVersion((v) => v + 1);
     }
+    // Nachschlage-Auftrag gerade fertig geworden? Ergebnis einmal melden.
+    if (jobRunning.current && !s.spotify.job.running && s.spotify.job.result) {
+      const r = s.spotify.job.result;
+      const found = r.features_found + r.genres_found;
+      toast(r.checked === 0 ? "Alle Tracks haben bereits vollständige Daten"
+        : `Nachschlagen fertig: ${found} Angaben ergänzt` + (r.still_missing ? `, ${r.still_missing} Track${r.still_missing === 1 ? "" : "s"} weiterhin ohne vollständige Daten` : ""));
+    }
+    jobRunning.current = s.spotify.job.running;
     busy.current = nowBusy;
-  }, [refreshTracks]);
+  }, [refreshTracks, toast]);
 
   useEffect(() => {
     refreshStatus().catch(() => {});

@@ -2,16 +2,20 @@
 from __future__ import annotations
 
 from ..music import key_relation
+from . import automation
 from .compat import section_bars, tempo_match
 
 TEMPLATES = {
-    "bass_swap": "Bass-Swap-Blend",
-    "filter_fade": "Filter-Fade",
+    "blend": "Blend (3-Band-EQ)",
+    "rise": "Rise (Filter + Bass-Swap)",
+    "fade": "Fade (Crossfade)",
+    "bass_swap": "Bass-Swap",
     "echo_out": "Echo-Out",
     "loop_out": "Loop-Out",
     "cut": "Cut auf die Eins",
     "smart_fader": "Smart-Fader-Übergang",
 }
+LEGACY = {"filter_fade": "rise"}  # Vorlagen älterer Versionen
 
 
 def _snap_len(bars: int) -> int:
@@ -43,19 +47,25 @@ def choose_template(a: dict, b: dict) -> tuple[str, str]:
         return "smart_fader", f"Tempo liegt {abs(tm['pct']):.0f} % auseinander – zu viel zum sauberen Angleichen."
     if key is not None and key < 0.3:
         return "echo_out", "Die Tonarten beißen sich – kurzer Übergang ohne lange Überlagerung."
+    good_key = key is None or key >= 0.6
     if precise:
+        overlap = min(outro, intro)
         if intro < 4 and jump > 0.12:
             return "cut", "B startet ohne Intro direkt mit voller Energie."
         if outro < 8 <= intro:
             return "loop_out", f"A hat nur {outro} Takte Outro, B aber {intro} Takte Intro – A per Loop verlängern."
-        if min(outro, intro) < 4:
+        if overlap < 4:
             return "echo_out", "Zu wenig Outro/Intro zum Überblenden."
-        if min(outro, intro) >= 8 and (key is None or key >= 0.6):
-            return "bass_swap", f"{min(outro, intro)} Takte Outro/Intro und passende Tonart – klassischer Blend."
-        return "filter_fade", "Kurze Überlappung – mit dem Filter weich überblenden."
-    if key is None or key >= 0.6:
-        return "bass_swap", "Tempo und Tonart passen – klassischer Blend."
-    return "filter_fade", "Tonart passt nur mäßig – mit dem Filter kurz überblenden."
+        if overlap >= 16 and good_key:
+            return "blend", f"{overlap} Takte Outro/Intro und passende Tonart – Zeit für eine lange, unauffällige EQ-Überblendung."
+        if overlap >= 8 and good_key:
+            return "rise", f"{overlap} Takte Überlappung und passende Tonart – B über den Filter hereinholen, Bass auf der Phrasengrenze tauschen."
+        return "fade", "Kurze Überlappung oder nur mäßig passende Tonart – knapper Crossfade mit Bass-Tausch."
+    if good_key and tm and abs(tm["pct"]) <= 3:
+        return "blend", "Tempo und Tonart passen – lange EQ-Überblendung."
+    if good_key:
+        return "rise", "Tonart passt, Tempo leicht verschieden – B über den Filter hereinholen."
+    return "fade", "Tonart passt nur mäßig – kurzer Crossfade."
 
 
 def plan(a: dict, b: dict, deck_a: int = 1, template: str | None = None) -> dict:
@@ -63,6 +73,7 @@ def plan(a: dict, b: dict, deck_a: int = 1, template: str | None = None) -> dict
     from .flx4 import steps_for
 
     auto, why = choose_template(a, b)
+    template = LEGACY.get(template or "", template)
     if template not in TEMPLATES:
         template = auto
     elif template != auto:
@@ -90,14 +101,19 @@ def plan(a: dict, b: dict, deck_a: int = 1, template: str | None = None) -> dict
             "in_range": abs(target / b["bpm"] - 1) <= 0.06,
         }
 
-    bars = {"bass_swap": 16, "filter_fade": 8, "echo_out": 2, "loop_out": 8, "cut": 0, "smart_fader": 8}[template]
+    bars = {"blend": 16, "rise": 8, "fade": 8, "bass_swap": 16, "echo_out": 2, "loop_out": 8, "cut": 1, "smart_fader": 8}[template]
     if precise:
         outro, intro = section_bars(a, "outro"), section_bars(b, "intro")
         n_a = a["analysis"]["n_bars"]
-        if template == "bass_swap":
-            bars = _snap_len(min(outro, intro)) or 8
-        elif template == "filter_fade":
-            bars = min(8, _snap_len(min(outro or 8, intro or 8)) or 4)
+        overlap = _snap_len(min(outro, intro))
+        if template == "blend":
+            bars = max(16, min(overlap or 16, 32))
+        elif template == "bass_swap":
+            bars = overlap or 8
+        elif template == "rise":
+            bars = 16 if overlap >= 16 else 8
+        elif template == "fade":
+            bars = 8 if overlap >= 8 else 4
         elif template == "loop_out":
             bars = min(_snap_len(intro) or 8, 16)
 
@@ -124,7 +140,7 @@ def plan(a: dict, b: dict, deck_a: int = 1, template: str | None = None) -> dict
         out["mix_in"] = {"bar": in_bar + 1, "time": round(_bar_time(b, in_bar), 2), "label": _fmt(_bar_time(b, in_bar))}
         out["end"] = {"time": round(_bar_time(a, out_bar + max(bars, 1)), 2)}
         out["cues_a"] = [{"pad": 8, "name": "MIX OUT", "time": out["mix_out"]["time"], "label": out["mix_out"]["label"]}]
-        if template == "bass_swap":
+        if template in ("bass_swap", "blend", "rise", "fade", "loop_out"):
             t = _bar_time(a, out_bar + bars // 2)
             out["cues_a"].append({"pad": 7, "name": "BASS SWAP", "time": round(t, 2), "label": _fmt(t)})
         out["cues_b"] = [{"pad": 1, "name": "MIX IN", "time": out["mix_in"]["time"], "label": out["mix_in"]["label"]}]
@@ -132,5 +148,8 @@ def plan(a: dict, b: dict, deck_a: int = 1, template: str | None = None) -> dict
             t = _bar_time(b, drop_bar)
             out["cues_b"].append({"pad": 2, "name": "DROP", "time": round(t, 2), "label": _fmt(t)})
     out["bars"] = bars
+    out["automation"] = automation.build(template, bars, out["deck_a"], out["deck_b"])
+    if precise:
+        out["bar_len_a"], out["bar_len_b"] = a["analysis"]["bar_len"], b["analysis"]["bar_len"]
     out["steps"] = steps_for(out, a, b)
     return out

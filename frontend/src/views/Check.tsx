@@ -75,6 +75,8 @@ function CheckResult({ id }: { id: number }) {
   const toast = useToast();
   const [curve, setCurve] = useState("free");
   const [focus, setFocus] = useState("balanced");
+  const [orderBy, setOrderBy] = useState("");
+  const [sort, setSort] = useState<{ key: "pos" | "bpm" | "key" | "energy" | "mood" | "family"; dir: 1 | -1 }>({ key: "pos", dir: 1 });
   const [refreshing, setRefreshing] = useState(false);
   const [pinFirst, setPinFirst] = useState(false);
   const [pinLast, setPinLast] = useState(false);
@@ -82,7 +84,7 @@ function CheckResult({ id }: { id: number }) {
   const [missing, setMissing] = useState(false);
   const [applying, setApplying] = useState(false);
 
-  const load = useCallback(() => api.review(id, curve, pinFirst, pinLast, focus).then(setReview).catch(() => setMissing(true)), [id, curve, pinFirst, pinLast, focus]);
+  const load = useCallback(() => api.review(id, curve, pinFirst, pinLast, focus, orderBy).then(setReview).catch(() => setMissing(true)), [id, curve, pinFirst, pinLast, focus, orderBy]);
   useEffect(() => { load(); }, [load, dataVersion]);
 
   if (missing) return <Empty icon={<ScanSearch size={26} />} title="Playlist nicht gefunden" action={<Button onClick={() => go("check")}>Zurück</Button>} />;
@@ -176,13 +178,21 @@ function CheckResult({ id }: { id: number }) {
           )}
         </section>
 
+        <TrackTable review={review} sort={sort} setSort={setSort} onOpen={openTrack} onEnrich={async () => {
+          const r = await run(() => api.enrich(review.tracks.map((t) => t.id)));
+          if (r) { toast(r.queued ? `Schlage Daten für ${r.queued} Tracks nach` : "Für diese Tracks gibt es nichts nachzuschlagen"); refreshStatus(); }
+        }} />
+
         <Card className="p-5">
           <div className="flex flex-wrap items-center gap-x-5 gap-y-3">
             <div className="flex items-center gap-2 font-semibold"><Wand2 size={17} className="text-accent" /> Umbau-Vorschlag</div>
-            <label className="flex items-center gap-2 text-[13px] text-muted">Schwerpunkt
-              <Select value={focus} onChange={setFocus}>{Object.entries(review.focus_options).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select>
+            <label className="flex items-center gap-2 text-[13px] text-muted">Reihenfolge
+              <Select value={orderBy ? `sort:${orderBy}` : focus} onChange={(v) => { if (v.startsWith("sort:")) setOrderBy(v.slice(5)); else { setOrderBy(""); setFocus(v); } }}>
+                <optgroup label="Optimieren">{Object.entries(review.focus_options).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</optgroup>
+                <optgroup label="Fest sortieren">{Object.entries(review.order_options).map(([k, l]) => <option key={k} value={`sort:${k}`}>{l}</option>)}</optgroup>
+              </Select>
             </label>
-            <label className="flex items-center gap-2 text-[13px] text-muted">Energiekurve
+            <label className={cx("flex items-center gap-2 text-[13px] text-muted", orderBy && "pointer-events-none opacity-40")} title={orderBy ? "Bei fester Sortierung ohne Wirkung" : undefined}>Energiekurve
               <Select value={curve} onChange={setCurve}>{Object.entries(status?.curves ?? {}).map(([k, l]) => <option key={k} value={k}>{l}</option>)}</Select>
             </label>
             <Toggle checked={pinFirst} onChange={setPinFirst}>Erster Track bleibt</Toggle>
@@ -263,6 +273,67 @@ function MoodBand({ moods, tracks, onOpen, compact }: { moods: string[]; tracks:
       )}
     </div>
   );
+}
+
+type SortState = { key: "pos" | "bpm" | "key" | "energy" | "mood" | "family"; dir: 1 | -1 };
+const camelotRank = (c: string | null) => (c ? parseInt(c, 10) * 2 + (c.endsWith("B") ? 1 : 0) : 999);
+
+/** Alle Tracks der Playlist mit ihren Daten – sortierbar, fehlende Werte markiert. */
+function TrackTable({ review, sort, setSort, onOpen, onEnrich }: { review: Review; sort: SortState; setSort: (s: SortState) => void; onOpen: (id: number) => void; onEnrich: () => void }) {
+  const rows = review.tracks.map((t, i) => ({ t, pos: i + 1 }));
+  const value = (r: { t: Track; pos: number }): number | string => {
+    switch (sort.key) {
+      case "bpm": return r.t.bpm ?? (sort.dir === 1 ? 9999 : -1);
+      case "key": return camelotRank(r.t.camelot);
+      case "energy": return r.t.energy ?? (sort.dir === 1 ? 9 : -1);
+      case "mood": return r.t.mood || "zzz";
+      case "family": return r.t.family || "zzz";
+      default: return r.pos;
+    }
+  };
+  rows.sort((a, b) => { const va = value(a), vb = value(b); return (va < vb ? -1 : va > vb ? 1 : a.pos - b.pos) * sort.dir; });
+  const missing = review.tracks.filter((t) => t.incomplete).length;
+  const head = (key: SortState["key"], label: string, className?: string) => (
+    <th className={cx("px-3 py-2 font-medium", className)}>
+      <button className={cx("hover:text-text", sort.key === key && "text-accent")} onClick={() => setSort({ key, dir: sort.key === key ? (sort.dir === 1 ? -1 : 1) : 1 })}>
+        {label}{sort.key === key ? (sort.dir === 1 ? " ↑" : " ↓") : ""}
+      </button>
+    </th>
+  );
+  return (
+    <section>
+      <div className="mb-3 flex flex-wrap items-center gap-3">
+        <h2 className="font-semibold">Tracks und Daten</h2>
+        <span className="text-[13px] text-muted">Spaltenkopf anklicken zum Sortieren (ändert nur diese Ansicht).</span>
+        {missing > 0 && <Button size="sm" className="ml-auto" onClick={onEnrich}>{missing} unvollständig – Daten ergänzen</Button>}
+      </div>
+      <Card className="overflow-x-auto">
+        <table className="w-full min-w-[720px] border-collapse text-left text-[13px]">
+          <thead><tr className="border-b border-line text-xs text-muted">
+            {head("pos", "Platz", "w-16")}<th className="px-3 py-2 font-medium">Titel</th>{head("bpm", "BPM", "text-right")}{head("key", "Tonart")}{head("energy", "Energie")}{head("mood", "Stimmung")}{head("family", "Genre")}<th className="px-3 py-2 font-medium">Quelle</th>
+          </tr></thead>
+          <tbody>
+            {rows.map(({ t, pos }) => (
+              <tr key={t.id} className="border-b border-line/60 last:border-0 hover:bg-hover/60">
+                <td className="num px-3 py-1.5 font-semibold text-muted">{pos}</td>
+                <td className="max-w-0 w-[32%] px-3 py-1.5"><button className="block max-w-full truncate text-left font-medium hover:text-accent" onClick={() => onOpen(t.id)} title="Details öffnen und Daten korrigieren">{t.title}</button><div className="truncate text-xs text-muted">{t.artist || "Unbekannt"}</div></td>
+                <td className="num px-3 py-1.5 text-right font-mono">{t.bpm ? <>{t.bpm_hint && <span className="mr-1 text-ok" title={t.bpm_hint.text}>⚠</span>}{t.estimated ? "~" : ""}{fmtBpm(t.bpm)}</> : <Missing />}</td>
+                <td className="px-3 py-1.5">{t.camelot ? <KeyBadge camelot={t.camelot} name={t.key_name} /> : <Missing />}</td>
+                <td className="px-3 py-1.5">{t.energy !== null ? <span className="inline-flex items-center gap-2"><span className="h-1.5 w-12 overflow-hidden rounded-full bg-line"><span className="block h-full rounded-full bg-accent" style={{ width: `${t.energy * 100}%` }} /></span><span className="num text-xs text-muted">{Math.round(t.energy * 100)}</span></span> : <Missing />}</td>
+                <td className="px-3 py-1.5">{t.mood ? <span className="inline-flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: moodColor(t.mood) }} />{t.mood}</span> : <Missing />}</td>
+                <td className="px-3 py-1.5">{t.family || <Missing />}</td>
+                <td className="px-3 py-1.5 text-xs text-muted">{t.path ? "Datei (eigene Analyse)" : t.data_source || "–"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </Card>
+    </section>
+  );
+}
+
+function Missing() {
+  return <span className="rounded bg-bad/15 px-1.5 py-0.5 text-[11px] font-medium text-bad">fehlt</span>;
 }
 
 function ScoreRing({ score, color }: { score: number; color: string }) {

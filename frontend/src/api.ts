@@ -37,7 +37,8 @@ export const api = {
   bulk: (ids: number[], body: { family?: string; delete?: boolean }) => call("POST", "/api/tracks/bulk", { ids, ...body }),
   scan: (path: string) => call<{ found: number; added: number; linked: number }>("POST", "/api/library/scan", { path }),
   demo: () => call<{ found: number }>("POST", "/api/library/demo"),
-  fillGenres: () => call<{ queued: number }>("POST", "/api/library/genres"),
+  enrich: (ids?: number[]) => call<{ queued: number }>("POST", "/api/library/enrich", { ids: ids ?? null }),
+  enrichTrack: (id: number) => call<{ track: Track; found: { features: boolean; genres: boolean }; complete: boolean }>("POST", `/api/tracks/${id}/enrich`),
   fs: (path: string) => call<{ path: string; parent: string | null; dirs: string[]; audio_files: number }>("GET", `/api/fs${q({ path })}`),
 
   spotifyLogin: () => call<{ url: string }>("GET", "/api/spotify/login"),
@@ -63,8 +64,8 @@ export const api = {
   discover: (id: number) => call<Suggestion[]>("GET", `/api/sets/${id}/discover`),
   transition: (id: number, index: number, template?: string) =>
     call<TransitionDetail>("GET", `/api/sets/${id}/transition/${index}${q({ template })}`),
-  review: (id: number, curve: string, pin_first: boolean, pin_last: boolean, focus: string) =>
-    call<Review>("GET", `/api/sets/${id}/review${q({ curve, pin_first, pin_last, focus })}`),
+  review: (id: number, curve: string, pin_first: boolean, pin_last: boolean, focus: string, order_by: string) =>
+    call<Review>("GET", `/api/sets/${id}/review${q({ curve, pin_first, pin_last, focus, order_by })}`),
   refreshSet: (id: number) => call<{ changes: Changes; set: SetView }>("POST", `/api/sets/${id}/refresh`),
   linkCandidates: (id: number) => call<Track[]>("GET", `/api/tracks/${id}/link-candidates`),
   linkTrack: (id: number, other_id: number) => call<Track>("POST", `/api/tracks/${id}/link`, { other_id }),

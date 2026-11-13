@@ -19,3 +19,11 @@ def lib(tmp_path_factory, demo_dir):
     tracks = {t["title"]: t for t in db.get_tracks(result["track_ids"])}
     assert all(t["status"] == "done" for t in tracks.values()), [t["error"] for t in tracks.values()]
     return tracks
+
+
+@pytest.fixture(autouse=True)
+def no_deezer_network(monkeypatch):
+    """Tests rufen Deezer nie wirklich auf; einzelne Tests setzen eigene Attrappen."""
+    from settracker.spotify import deezer
+
+    monkeypatch.setattr(deezer, "find", lambda track: None)

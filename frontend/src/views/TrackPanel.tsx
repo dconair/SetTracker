@@ -1,9 +1,9 @@
-import { Link2, Link2Off, Pause, Play, Repeat, TriangleAlert, X } from "lucide-react";
+import { Link2, Link2Off, Pause, Play, RefreshCw, Repeat, TriangleAlert, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { api } from "../api";
 import { useStore } from "../store";
 import type { Track, TrackDetail, WaveData } from "../types";
-import { Button, fmtBpm, fmtTime, IconButton, KeyBadge, SourceTag, useAction } from "../ui";
+import { Button, cx, fmtBpm, fmtTime, IconButton, inputClass, KeyBadge, Select, SourceTag, useAction, useToast } from "../ui";
 import { Waveform, type Marker } from "../Waveform";
 
 export const cueColor = (name: string) =>
@@ -149,6 +149,8 @@ export function TrackPanel({ id, onClose }: { id: number; onClose: () => void })
                 Reinmixen, LOOP OUTRO hält den Beat, bis der nächste Track sitzt.
               </section>
             )}
+            <DataEditor track={track} onChanged={changed} />
+
             {track.path && track.spotify_id && (
               <div className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-[13px] text-muted">
                 <Link2 size={16} className="shrink-0 text-accent" />
@@ -161,5 +163,71 @@ export function TrackPanel({ id, onClose }: { id: number; onClose: () => void })
         )}
       </div>
     </div>
+  );
+}
+
+
+/** Herkunft der Daten, erneutes Nachschlagen und Korrektur von Hand (BPM, Tonart, Genre). */
+function DataEditor({ track, onChanged }: { track: TrackDetail; onChanged: () => void }) {
+  const { status } = useStore();
+  const run = useAction();
+  const toast = useToast();
+  const [bpm, setBpm] = useState(track.bpm ? String(track.bpm) : "");
+  const [key, setKey] = useState(track.camelot ?? "");
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { setBpm(track.bpm ? String(track.bpm) : ""); setKey(track.camelot ?? ""); }, [track.id, track.bpm, track.camelot]);
+
+  const save = async (patch: { bpm?: number; camelot?: string; family?: string }) => {
+    if (await run(() => api.patchTrack(track.id, patch), "Gespeichert")) onChanged();
+  };
+  const scale = (factor: number) => track.bpm && save({ bpm: Math.round(track.bpm * factor * 100) / 100 });
+  const retry = async () => {
+    setBusy(true);
+    const r = await run(() => api.enrichTrack(track.id));
+    setBusy(false);
+    if (!r) return;
+    const got = [r.found.features && "BPM, Tonart und Stimmung", r.found.genres && "Genre"].filter(Boolean).join(" und ");
+    toast(got ? `Gefunden: ${got}` : r.complete ? "Die Daten sind bereits vollständig" : "Keine der Quellen kennt diesen Track – bitte von Hand eintragen");
+    onChanged();
+  };
+  const dirty = (bpm && Number(bpm) !== track.bpm) || key.toUpperCase() !== (track.camelot ?? "");
+  const source = track.path ? "eigene Analyse der Audiodatei" : track.data_source || "noch keine";
+
+  return (
+    <section className="rounded-xl border border-line bg-surface p-4">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <h3 className="font-semibold">Daten</h3>
+          <div className="text-[13px] text-muted">Quelle: {source}{track.estimated && " – aus einem 30-Sekunden-Ausschnitt geschätzt, bitte gegenprüfen"}</div>
+        </div>
+        {!track.path && <Button size="sm" icon={<RefreshCw size={14} />} loading={busy} onClick={retry}>Erneut suchen</Button>}
+      </div>
+      {track.bpm_hint && (
+        <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg bg-hover px-3 py-2 text-[13px]">
+          <TriangleAlert size={15} className="shrink-0 text-ok" /><span className="min-w-0 flex-1">{track.bpm_hint.text}</span>
+          {track.bpm_hint.suggest && <Button size="sm" onClick={() => save({ bpm: track.bpm_hint!.suggest! })}>Auf {track.bpm_hint.suggest} BPM korrigieren</Button>}
+        </div>
+      )}
+      <div className="mt-3 flex flex-wrap items-end gap-3">
+        <label className="text-xs text-muted">BPM
+          <span className="mt-1 flex gap-1">
+            <input value={bpm} onChange={(e) => setBpm(e.target.value.replace(",", "."))} inputMode="decimal" className={cx(inputClass, "num w-24 font-mono")} placeholder="z. B. 124" />
+            <Button size="sm" className="h-9" disabled={!track.bpm} onClick={() => scale(0.5)} title="Halbes Tempo">÷2</Button>
+            <Button size="sm" className="h-9" disabled={!track.bpm} onClick={() => scale(2)} title="Doppeltes Tempo">×2</Button>
+          </span>
+        </label>
+        <label className="text-xs text-muted">Tonart (Camelot)
+          <input value={key} onChange={(e) => setKey(e.target.value)} className={cx(inputClass, "num mt-1 block w-24 font-mono uppercase")} placeholder="z. B. 8A" maxLength={3} />
+        </label>
+        <label className="text-xs text-muted">Genre
+          <Select value={track.family} onChange={(family) => save({ family })} className="mt-1 block">
+            <option value="">– ohne –</option>
+            {(status?.families ?? []).map((f) => <option key={f} value={f}>{f}</option>)}
+          </Select>
+        </label>
+        <Button variant="primary" disabled={!dirty} onClick={() => save({ ...(bpm && Number(bpm) !== track.bpm ? { bpm: Number(bpm) } : {}), ...(key.toUpperCase() !== (track.camelot ?? "") && key ? { camelot: key } : {}) })}>Speichern</Button>
+      </div>
+      {track.path && <p className="mt-2 text-xs text-faint">Bei lokalen Dateien stammen die Werte aus der eigenen Analyse; eine Korrektur von Hand bleibt bestehen, bis die Datei neu analysiert wird.</p>}
+    </section>
   );
 }

@@ -106,3 +106,26 @@ def mood_label(energy: float | None, valence: float | None) -> str:
     if energy >= 0.4:
         return "Groovig" if v >= 0.5 else "Deep & hypnotisch"
     return "Entspannt" if v >= 0.5 else "Melancholisch"
+
+
+# Übliche Tempobereiche je Genre-Familie (BPM) – zum Erkennen unplausibler Schätzwerte.
+TEMPO_RANGES = {
+    "House": (112, 134), "Techno": (120, 152), "Trance": (126, 148), "Drum & Bass": (160, 182),
+    "Dubstep & Bass": (135, 152), "UK Garage": (124, 142), "Hardstyle & Hardcore": (140, 200),
+    "Disco & Funk": (100, 132), "Afro & Amapiano": (105, 128), "Hip-Hop": (70, 110),
+}
+
+
+def tempo_check(bpm: float | None, family: str | None) -> dict | None:
+    """Passt das Tempo zum Genre? Liefert None (plausibel/unbekannt) oder einen Hinweis.
+
+    Liegt das halbe oder doppelte Tempo im üblichen Bereich, wird es als Korrektur vorgeschlagen –
+    Halb-/Doppeltempo ist der häufigste Fehler automatischer Tempoerkennung.
+    """
+    rng = TEMPO_RANGES.get(family or "")
+    if not bpm or not rng or rng[0] <= bpm <= rng[1]:
+        return None
+    for factor in (2.0, 0.5):
+        if rng[0] <= bpm * factor <= rng[1]:
+            return {"suggest": round(bpm * factor, 2), "text": f"{bpm:g} BPM ist für {family} unüblich – vermutlich {bpm * factor:g} BPM ({'doppeltes' if factor == 2 else 'halbes'} Tempo)."}
+    return {"suggest": None, "text": f"{bpm:g} BPM ist für {family} unüblich (meist {rng[0]}–{rng[1]}). Bitte prüfen."}

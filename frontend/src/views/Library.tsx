@@ -22,6 +22,7 @@ export function SpotifyLogo({ size = 16 }: { size?: number }) {
 export function Library() {
   const { tracks, status, sets, refreshTracks, refreshSets, refreshStatus, playing, togglePlay, go, openTrack } = useStore();
   const run = useAction();
+  const toast = useToast();
   const dialogs = useDialog();
   const [family, setFamily] = useState("");
   const [source, setSource] = useState("");
@@ -115,7 +116,13 @@ export function Library() {
     </th>
   );
 
-  const missingGenres = all.filter((t) => !t.family).length;
+  const incompleteCount = all.filter((t) => t.incomplete).length;
+  const startEnrich = async (ids?: number[]) => {
+    const r = await run(() => api.enrich(ids));
+    if (!r) return;
+    toast(r.queued ? `Schlage Daten für ${r.queued} Track${r.queued === 1 ? "" : "s"} nach – Fortschritt unten links` : "Für diese Tracks gibt es nichts nachzuschlagen");
+    await refreshStatus();
+  };
   const localCount = all.filter((t) => t.source === "local").length;
 
   return (
@@ -175,11 +182,11 @@ export function Library() {
                 <input value={bpmMax} onChange={(e) => setBpmMax(e.target.value)} placeholder="bis" inputMode="numeric" className={cx(inputClass, "num w-16 px-2 text-center")} aria-label="BPM bis" />
               </div>
             </div>
-            {missingGenres > 0 && !status?.spotify.job.running && (family === NONE || missingGenres > all.length / 3) && (
+            {incompleteCount > 0 && !status?.spotify.job.running && (
               <div className="fade flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface px-4 py-3 text-[13px]">
                 <Tags size={16} className="text-accent" />
-                <span className="flex-1 text-muted"><b className="font-medium text-text">{missingGenres} Tracks ohne Genre.</b> SetTracker kann sie über den Künstler bei MusicBrainz nachschlagen (ca. 1 Track pro Sekunde).</span>
-                <Button size="sm" onClick={() => run(async () => { await api.fillGenres(); await refreshStatus(); }, "Genres werden ergänzt")}>Genres ergänzen</Button>
+                <span className="min-w-56 flex-1 text-muted"><b className="font-medium text-text">{incompleteCount} Track{incompleteCount === 1 ? "" : "s"} ohne vollständige Daten</b> (BPM, Tonart, Stimmung oder Genre). SetTracker fragt dafür weitere Quellen ab: ReccoBeats, einen 30-Sekunden-Vorhörclip von Deezer und MusicBrainz. Das dauert etwa 1–3 Sekunden pro Track.</span>
+                <Button size="sm" variant="primary" onClick={() => startEnrich()}>Daten ergänzen</Button>
               </div>
             )}
           </div>
@@ -191,6 +198,7 @@ export function Library() {
               <Menu align="left" trigger={() => <Button size="sm" icon={<Tags size={15} />}>Genre setzen</Button>}>
                 {(close) => (status?.families ?? []).map((f) => <MenuItem key={f} onClick={() => { close(); setGenre(picked, f); }}>{f}</MenuItem>)}
               </Menu>
+              <Button size="sm" icon={<Search size={15} />} onClick={() => startEnrich(picked)}>Daten ergänzen</Button>
               <Button size="sm" variant="danger" icon={<Trash2 size={15} />} onClick={async () => {
                 if (!(await dialogs.confirm(`${picked.length} Tracks aus der Bibliothek entfernen?`, "Die Dateien selbst bleiben erhalten.", { action: "Entfernen", danger: true }))) return;
                 await run(() => api.bulk(picked, { delete: true }), "Entfernt");
@@ -248,7 +256,7 @@ export function Library() {
                             </div>
                           ) : <span className="text-faint">–</span>}
                         </td>
-                        <td className="num px-3 py-2 text-right font-mono text-[13px]"><StatusOr track={t}>{fmtBpm(t.bpm)}</StatusOr></td>
+                        <td className="num px-3 py-2 text-right font-mono text-[13px]"><StatusOr track={t}>{t.bpm_hint && <span className="mr-1 text-ok" title={t.bpm_hint.text}>⚠</span>}{t.estimated && <span className="text-faint" title="Aus einem 30-Sekunden-Vorhörclip geschätzt">~</span>}{fmtBpm(t.bpm)}</StatusOr></td>
                         <td className="px-3 py-2"><KeyBadge camelot={t.camelot} name={t.key_name} /></td>
                         <td className="px-3 py-2"><Meter value={t.energy} /></td>
                         <td className="px-3 py-2 text-[13px] text-muted">{t.mood || "–"}</td>
